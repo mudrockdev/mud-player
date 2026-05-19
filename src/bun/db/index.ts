@@ -1,14 +1,21 @@
-import { drizzle } from "drizzle-orm/bun-sql";
-import schema from "./schema";
-import { mkdir } from "fs/promises";
+import { drizzle } from "drizzle-orm/libsql";
+import { migrate } from "drizzle-orm/libsql/migrator";
+import { mkdirSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import * as schema from "./schema";
 
-const homePath = Bun.env.HOME as string; // "/home/user"
+const homePath = Bun.env.HOME as string;
+const dbDir = join(homePath, ".local/share/mud-player");
 
-const dbFolder = Bun.file(`${homePath}/.local/share/mud-player`);
-if (!dbFolder.exists()) {
-  await mkdir(`${homePath}/.local/share/mud-player`);
+if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
+
+const dbPath = join(dbDir, "database.sqlite");
+
+export const db = drizzle(`file:${dbPath}`, { schema });
+
+const migrationsFolder = resolve(import.meta.dir, "../../../drizzle");
+if (existsSync(migrationsFolder)) {
+	await migrate(db, { migrationsFolder });
 }
 
-const dbPath = `${homePath}/.local/share/mud-player/database.sqlite`; // /home/user/.local/share/mud-player/database.sqlite
-
-export const db = drizzle(dbPath, { schema: schema });
+export { schema };

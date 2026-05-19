@@ -1,7 +1,10 @@
 import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun";
-import { readdir, mkdir, readFile, writeFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { basename, join, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { db } from "./db";
+import { playlists, songs } from "./db/schema";
 import type { Folder, MudPlayerRPC, Track } from "../shared/types";
 
 const DEV_SERVER_PORT = 5173;
@@ -11,35 +14,12 @@ const AUDIO_EXTS = new Set([
 	".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".oga", ".opus", ".webm",
 ]);
 
-const STATE_DIR = Utils.paths.userData;
-const STATE_FILE = join(STATE_DIR, "folders.json");
-
-async function ensureStateDir() {
-	if (!existsSync(STATE_DIR)) {
-		await mkdir(STATE_DIR, { recursive: true });
-	}
-}
-
-async function loadFolderPaths(): Promise<string[]> {
-	try {
-		const raw = await readFile(STATE_FILE, "utf8");
-		const parsed = JSON.parse(raw);
-		if (Array.isArray(parsed)) return parsed.filter((p) => typeof p === "string");
-	} catch {}
-	return [];
-}
-
-async function saveFolderPaths(paths: string[]) {
-	await ensureStateDir();
-	await writeFile(STATE_FILE, JSON.stringify(paths, null, 2), "utf8");
-}
-
-async function scanFolder(folderPath: string): Promise<Folder | null> {
+async function listAudioFiles(folderPath: string): Promise<Track[]> {
 	let entries;
 	try {
 		entries = await readdir(folderPath, { withFileTypes: true });
 	} catch {
-		return null;
+		return [];
 	}
 	const tracks: Track[] = [];
 	for (const entry of entries) {
@@ -55,11 +35,53 @@ async function scanFolder(folderPath: string): Promise<Folder | null> {
 		});
 	}
 	tracks.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-	return {
-		path: folderPath,
-		name: basename(folderPath) || folderPath,
-		tracks,
-	};
+	return tracks;
+}
+
+async function syncPlaylistSongs(playlistId: string, folderPath: string): Promise<Track[]> {
+	const fsTracks = await listAudioFiles(folderPath);
+	const fsByPath = new Map(fsTracks.map((t) => [t.path, t]));
+
+	const existing = await db.select().from(songs).where(eq(songs.playlistId, playlistId));
+	const existingByPath = new Map(existing.map((s) => [s.path, s]));
+
+	const toInsert = fsTracks
+		.filter((t) => !existingByPath.has(t.path))
+		.map((t) => ({
+			id: randomUUID(),
+			playlistId,
+			path: t.path,
+			name: t.name,
+		}));
+	if (toInsert.length) {
+		await db.insert(songs).values(toInsert);
+	}
+
+	for (const row of existing) {
+		if (!fsByPath.has(row.path)) {
+			await db.delete(songs).where(and(eq(songs.playlistId, playlistId), eq(songs.path, row.path)));
+		}
+	}
+
+	const final = await db.select().from(songs).where(eq(songs.playlistId, playlistId));
+	final.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+	return final.map((s) => ({ path: s.path, name: s.name, folder: folderPath }));
+}
+
+async function buildFolder(playlistId: string, folderPath: string, name: string): Promise<Folder> {
+	const tracks = await syncPlaylistSongs(playlistId, folderPath);
+	return { path: folderPath, name, tracks };
+}
+
+async function loadAllFolders(): Promise<Folder[]> {
+	const rows = await db.select().from(playlists);
+	rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+	const folders: Folder[] = [];
+	for (const row of rows) {
+		allowedRoots.add(resolve(row.folderPath));
+		folders.push(await buildFolder(row.id, row.folderPath, row.name));
+	}
+	return folders;
 }
 
 const allowedRoots = new Set<string>();
@@ -163,7 +185,9 @@ async function getMainViewUrl(): Promise<string> {
 const streamPort = startStreamServer();
 console.log(`Audio stream server on http://127.0.0.1:${streamPort}`);
 
-for (const p of await loadFolderPaths()) allowedRoots.add(resolve(p));
+for (const row of await db.select({ folderPath: playlists.folderPath }).from(playlists)) {
+	allowedRoots.add(resolve(row.folderPath));
+}
 
 const rpc = BrowserView.defineRPC<MudPlayerRPC>({
 	handlers: {
@@ -178,43 +202,36 @@ const rpc = BrowserView.defineRPC<MudPlayerRPC>({
 				const chosen = paths.find((p) => p && p.length > 0);
 				if (!chosen) return null;
 				const abs = resolve(chosen);
-				const folder = await scanFolder(abs);
-				if (!folder) return null;
-				allowedRoots.add(abs);
-				const known = await loadFolderPaths();
-				if (!known.map((p) => resolve(p)).includes(abs)) {
-					known.push(abs);
-					await saveFolderPaths(known);
+
+				let existing = await db.select().from(playlists).where(eq(playlists.folderPath, abs)).limit(1);
+				let row = existing[0];
+				if (!row) {
+					const id = randomUUID();
+					const name = basename(abs) || abs;
+					await db.insert(playlists).values({ id, name, folderPath: abs });
+					const inserted = await db.select().from(playlists).where(eq(playlists.id, id)).limit(1);
+					row = inserted[0]!;
 				}
-				return folder;
+
+				allowedRoots.add(abs);
+				return buildFolder(row.id, row.folderPath, row.name);
 			},
 			async loadFolders() {
-				const paths = await loadFolderPaths();
-				const folders: Folder[] = [];
-				for (const p of paths) {
-					const abs = resolve(p);
-					allowedRoots.add(abs);
-					const f = await scanFolder(abs);
-					if (f) folders.push(f);
-				}
-				return folders;
+				return loadAllFolders();
 			},
 			async rescanFolder({ path }) {
 				const abs = resolve(path);
 				if (!allowedRoots.has(abs)) return null;
-				return await scanFolder(abs);
+				const rows = await db.select().from(playlists).where(eq(playlists.folderPath, abs)).limit(1);
+				const row = rows[0];
+				if (!row) return null;
+				return buildFolder(row.id, row.folderPath, row.name);
 			},
 			async removeFolder({ path }) {
 				const abs = resolve(path);
 				allowedRoots.delete(abs);
-				const known = (await loadFolderPaths()).filter((p) => resolve(p) !== abs);
-				await saveFolderPaths(known);
-				const folders: Folder[] = [];
-				for (const p of known) {
-					const f = await scanFolder(resolve(p));
-					if (f) folders.push(f);
-				}
-				return folders;
+				await db.delete(playlists).where(eq(playlists.folderPath, abs));
+				return loadAllFolders();
 			},
 			async getStreamPort() {
 				return streamPort;
