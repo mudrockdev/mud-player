@@ -138,13 +138,6 @@
                         {player.activeFolder.path}
                     </p>
                 </div>
-                <button
-                    class="px-[18px] py-2.5 bg-[#4d7cff] border-none rounded-full text-white font-semibold cursor-pointer hover:bg-[#5b87ff]"
-                    onclick={() =>
-                        player.activeFolder &&
-                        player.playFolder(player.activeFolder.path, 0)}
-                    >Play all</button
-                >
             {:else}
                 <div>
                     <h1 class="m-0 text-[26px] font-bold">mud-player</h1>
@@ -324,7 +317,6 @@
             />
         </div>
     </footer>
-
 </main>
 
 <style>
