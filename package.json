@@ -11,6 +11,8 @@
     "build:canary": "vite build && electrobun build --env=canary"
   },
   "dependencies": {
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
     "electrobun": "1.18.1"
   },
   "devDependencies": {
