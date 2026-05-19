@@ -1,11 +1,13 @@
 import { BrowserView, BrowserWindow, Tray, Updater, Utils } from "electrobun/bun";
-import { basename, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db";
 import { playlists, songs } from "./db/schema";
 import { listAudioFiles } from "./audio";
 import { createStreamServer } from "./stream-server";
+import { buildTrayMenu, buildTrayTitle, classifyTrayClick } from "./tray-menu";
 import type { Folder, MudPlayerRPC, PlayerState, TrayAction } from "../shared/types";
 
 const DEV_SERVER_PORT = 5173;
@@ -172,8 +174,33 @@ const rpc = BrowserView.defineRPC<MudPlayerRPC>({
 let playerState: PlayerState = { hasTrack: false, paused: true, trackName: "" };
 let tray: Tray | null = null;
 
+function resolveIconPath(): string {
+	// In the bundle `import.meta.dir` is .../Resources/app/bun, with assets
+	// copied to .../Resources/app/assets. Running the source directly from
+	// `bun src/bun/index.ts` puts us at <repo>/src/bun, so the asset lives
+	// two levels up. Try both — fall through to the first candidate so the
+	// caller still gets a stable string for logs.
+	const candidates = [
+		join(import.meta.dir, "../assets/icon.png"),
+		join(import.meta.dir, "../../assets/icon.png"),
+		join(import.meta.dir, "../../../assets/icon.png"),
+	];
+	for (const c of candidates) {
+		if (existsSync(c)) return c;
+	}
+	return candidates[0];
+}
+
+const iconPath = resolveIconPath();
+
 try {
-	tray = new Tray({ title: "mud-player", template: true });
+	tray = new Tray({
+		title: "mud-player",
+		image: iconPath,
+		template: false,
+		width: 22,
+		height: 22,
+	});
 } catch (err) {
 	console.warn("Tray unavailable:", err);
 }
@@ -189,62 +216,15 @@ function sendTrayAction(action: TrayAction) {
 function updateTray(state: PlayerState) {
 	playerState = state;
 	if (!tray) return;
-	const titleText = state.hasTrack
-		? `${state.paused ? "❚❚" : "▶"} ${truncate(state.trackName, 40)}`
-		: "mud-player";
-	tray.setTitle(titleText);
-	tray.setMenu([
-		{
-			type: "normal",
-			label: state.hasTrack ? state.trackName : "(nothing playing)",
-			enabled: false,
-		},
-		{ type: "separator" },
-		{
-			type: "normal",
-			label: "Previous",
-			action: "prev",
-			enabled: state.hasTrack,
-		},
-		{
-			type: "normal",
-			label: "Play",
-			action: "toggle-play",
-			hidden: !state.paused,
-			enabled: state.hasTrack,
-		},
-		{
-			type: "normal",
-			label: "Stop",
-			action: "toggle-play",
-			hidden: state.paused,
-			enabled: state.hasTrack,
-		},
-		{
-			type: "normal",
-			label: "Next",
-			action: "next",
-			enabled: state.hasTrack,
-		},
-		{ type: "separator" },
-		{ type: "normal", label: "Quit", action: "quit" },
-	]);
-}
-
-function truncate(s: string, max: number): string {
-	return s.length <= max ? s : s.slice(0, max - 1) + "…";
+	tray.setTitle(buildTrayTitle(state));
+	tray.setMenu(buildTrayMenu(state));
 }
 
 tray?.on("tray-clicked", (event) => {
 	const action = (event as { data?: { action?: string } }).data?.action;
-	if (!action) return;
-	if (action === "quit") {
-		Utils.quit();
-		return;
-	}
-	if (action === "prev" || action === "next" || action === "toggle-play" || action === "stop") {
-		sendTrayAction(action);
-	}
+	const click = classifyTrayClick(action);
+	if (click.kind === "quit") Utils.quit();
+	else if (click.kind === "player") sendTrayAction(click.action);
 });
 
 updateTray(playerState);
