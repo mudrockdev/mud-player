@@ -12,6 +12,14 @@ export type Folder = {
 	tracks: Track[];
 };
 
+export type TrayAction = "prev" | "next" | "toggle-play" | "stop";
+
+export type PlayerState = {
+	hasTrack: boolean;
+	paused: boolean;
+	trackName: string;
+};
+
 export type MudPlayerRPC = {
 	bun: RPCSchema<{
 		requests: {
@@ -23,10 +31,13 @@ export type MudPlayerRPC = {
 		};
 		messages: {
 			log: { msg: string };
+			playerState: PlayerState;
 		};
 	}>;
 	webview: RPCSchema<{
 		requests: {};
-		messages: {};
+		messages: {
+			trayAction: { action: TrayAction };
+		};
 	}>;
 };

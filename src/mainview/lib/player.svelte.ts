@@ -11,7 +11,7 @@ import {
 	type QueueState,
 	type RepeatMode,
 } from "./queue";
-import { bun } from "./rpc";
+import { bun, onTrayAction, send } from "./rpc";
 
 export type { RepeatMode };
 
@@ -60,6 +60,20 @@ function createPlayer() {
 	syncFromStore();
 	vjs.subscribe(() => syncFromStore());
 
+	// Track last broadcast to avoid spamming the bun side on every timeupdate.
+	let lastBroadcast = { hasTrack: false, paused: true, trackName: "" };
+	function broadcastState(hasTrack: boolean, isPaused: boolean, trackName: string) {
+		if (
+			lastBroadcast.hasTrack === hasTrack &&
+			lastBroadcast.paused === isPaused &&
+			lastBroadcast.trackName === trackName
+		) return;
+		lastBroadcast = { hasTrack, paused: isPaused, trackName };
+		try {
+			send.playerState({ hasTrack, paused: isPaused, trackName });
+		} catch {}
+	}
+
 	// ── Derived values ─────────────────────────────────────────────────────
 	const activeFolder = $derived(
 		folders.find((f) => f.path === activeFolderPath) ?? null,
@@ -68,6 +82,19 @@ function createPlayer() {
 		queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null,
 	);
 	const isPlaying = $derived(!paused);
+
+	$effect.root(() => {
+		$effect(() => {
+			broadcastState(currentTrack !== null, paused, currentTrack?.name ?? "");
+		});
+	});
+
+	onTrayAction((action) => {
+		if (action === "prev") prev();
+		else if (action === "next") next(true);
+		else if (action === "toggle-play") togglePlay();
+		else if (action === "stop") stop();
+	});
 
 	function snapshot(): QueueState {
 		return {

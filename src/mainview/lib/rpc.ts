@@ -1,8 +1,19 @@
 import { Electroview } from "electrobun/view";
-import type { MudPlayerRPC } from "../../shared/types";
+import type { MudPlayerRPC, TrayAction } from "../../shared/types";
+
+let trayActionHandler: ((action: TrayAction) => void) | null = null;
+
+export function onTrayAction(handler: (action: TrayAction) => void) {
+	trayActionHandler = handler;
+}
 
 const rpc = Electroview.defineRPC<MudPlayerRPC>({
-	handlers: { requests: {}, messages: {} },
+	handlers: {
+		requests: {},
+		messages: {
+			trayAction: ({ action }) => trayActionHandler?.(action),
+		},
+	},
 });
 
 export const electroview = new Electroview({ rpc });

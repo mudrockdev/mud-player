@@ -1,4 +1,4 @@
-import { BrowserView, BrowserWindow, Updater, Utils } from "electrobun/bun";
+import { BrowserView, BrowserWindow, Tray, Updater, Utils } from "electrobun/bun";
 import { basename, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
@@ -6,7 +6,7 @@ import { db } from "./db";
 import { playlists, songs } from "./db/schema";
 import { listAudioFiles } from "./audio";
 import { createStreamServer } from "./stream-server";
-import type { Folder, MudPlayerRPC } from "../shared/types";
+import type { Folder, MudPlayerRPC, PlayerState, TrayAction } from "../shared/types";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
@@ -164,13 +164,94 @@ const rpc = BrowserView.defineRPC<MudPlayerRPC>({
 		},
 		messages: {
 			log: ({ msg }) => console.log("[webview]", msg),
+			playerState: (state) => updateTray(state),
 		},
 	},
 });
 
+let playerState: PlayerState = { hasTrack: false, paused: true, trackName: "" };
+let tray: Tray | null = null;
+
+try {
+	tray = new Tray({ title: "mud-player", template: true });
+} catch (err) {
+	console.warn("Tray unavailable:", err);
+}
+
+function sendTrayAction(action: TrayAction) {
+	try {
+		mainWindow.webview.rpc?.send.trayAction({ action });
+	} catch (err) {
+		console.warn("Failed to dispatch tray action:", err);
+	}
+}
+
+function updateTray(state: PlayerState) {
+	playerState = state;
+	if (!tray) return;
+	const titleText = state.hasTrack
+		? `${state.paused ? "❚❚" : "▶"} ${truncate(state.trackName, 40)}`
+		: "mud-player";
+	tray.setTitle(titleText);
+	tray.setMenu([
+		{
+			type: "normal",
+			label: state.hasTrack ? state.trackName : "(nothing playing)",
+			enabled: false,
+		},
+		{ type: "separator" },
+		{
+			type: "normal",
+			label: "Previous",
+			action: "prev",
+			enabled: state.hasTrack,
+		},
+		{
+			type: "normal",
+			label: "Play",
+			action: "toggle-play",
+			hidden: !state.paused,
+			enabled: state.hasTrack,
+		},
+		{
+			type: "normal",
+			label: "Stop",
+			action: "toggle-play",
+			hidden: state.paused,
+			enabled: state.hasTrack,
+		},
+		{
+			type: "normal",
+			label: "Next",
+			action: "next",
+			enabled: state.hasTrack,
+		},
+		{ type: "separator" },
+		{ type: "normal", label: "Quit", action: "quit" },
+	]);
+}
+
+function truncate(s: string, max: number): string {
+	return s.length <= max ? s : s.slice(0, max - 1) + "…";
+}
+
+tray?.on("tray-clicked", (event) => {
+	const action = (event as { data?: { action?: string } }).data?.action;
+	if (!action) return;
+	if (action === "quit") {
+		Utils.quit();
+		return;
+	}
+	if (action === "prev" || action === "next" || action === "toggle-play" || action === "stop") {
+		sendTrayAction(action);
+	}
+});
+
+updateTray(playerState);
+
 const url = await getMainViewUrl();
 
-new BrowserWindow<typeof rpc>({
+const mainWindow = new BrowserWindow<typeof rpc>({
 	title: "mud-player",
 	url,
 	rpc,
