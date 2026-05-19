@@ -15,6 +15,7 @@
     "noFallthroughCasesInSwitch": true,
     "moduleResolution": "bundler",
     "types": ["bun", "bun-types"],
+    "skipLibCheck": true,
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "build", "../../package/dist"],

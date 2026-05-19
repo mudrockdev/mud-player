@@ -1,475 +1,332 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { player } from "./lib/player.svelte";
+    import { onMount } from "svelte";
+    import { player } from "./lib/player.svelte";
 
-  let audio: HTMLAudioElement | undefined = $state();
+    let audio: HTMLAudioElement | undefined = $state();
 
-  onMount(() => {
-    player.init();
-  });
+    onMount(() => {
+        player.init();
+    });
 
-  $effect(() => {
-    if (!audio) return;
-    if (player.isPlaying) audio.play().catch(() => {});
-    else audio.pause();
-  });
+    $effect(() => {
+        if (!audio) return;
+        if (player.isPlaying) audio.play().catch(() => {});
+        else audio.pause();
+    });
 
-  $effect(() => {
-    if (!audio) return;
-    audio.volume = player.volume;
-  });
+    $effect(() => {
+        if (!audio) return;
+        audio.volume = player.volume;
+    });
 
-  function onTimeUpdate() {
-    if (!audio) return;
-    player.currentTime = audio.currentTime;
-  }
+    function onTimeUpdate() {
+        if (!audio) return;
+        player.currentTime = audio.currentTime;
+    }
 
-  function onLoadedMeta() {
-    if (!audio) return;
-    player.duration = audio.duration || 0;
-  }
+    function onLoadedMeta() {
+        if (!audio) return;
+        player.duration = audio.duration || 0;
+    }
 
-  function onScrub(e: Event) {
-    if (!audio) return;
-    const v = parseFloat((e.target as HTMLInputElement).value);
-    audio.currentTime = v;
-    player.currentTime = v;
-  }
+    function onScrub(e: Event) {
+        if (!audio) return;
+        const v = parseFloat((e.target as HTMLInputElement).value);
+        audio.currentTime = v;
+        player.currentTime = v;
+    }
 
-  function onVolume(e: Event) {
-    player.setVolume(parseFloat((e.target as HTMLInputElement).value));
-  }
+    function onVolume(e: Event) {
+        player.setVolume(parseFloat((e.target as HTMLInputElement).value));
+    }
 
-  function fmt(s: number): string {
-    if (!isFinite(s) || s < 0) return "0:00";
-    const m = Math.floor(s / 60);
-    const r = Math.floor(s % 60);
-    return `${m}:${r.toString().padStart(2, "0")}`;
-  }
+    function fmt(s: number): string {
+        if (!isFinite(s) || s < 0) return "0:00";
+        const m = Math.floor(s / 60);
+        const r = Math.floor(s % 60);
+        return `${m}:${r.toString().padStart(2, "0")}`;
+    }
 
-  function trackKey(t: { path: string }) { return t.path; }
+    function trackKey(t: { path: string }) {
+        return t.path;
+    }
 </script>
 
-<main>
-  <aside class="sidebar">
-    <div class="sidebar-head">
-      <h2>Folders</h2>
-      <button class="add" onclick={() => player.addFolder()} title="Import folder">+</button>
-    </div>
-    {#if player.folders.length === 0}
-      <p class="empty">No folders yet. Click + to import.</p>
-    {:else}
-      <ul class="folder-list">
-        {#each player.folders as folder (folder.path)}
-          <li
-            class="folder-item"
-            class:active={folder.path === player.activeFolderPath}
-          >
-            <button
-              class="folder-main"
-              ondblclick={() => player.playFolder(folder.path, 0)}
-              onclick={() => player.selectFolder(folder.path)}
-              title={folder.path}
+<main
+    class="grid h-screen bg-[#0f1115] text-[#e7e9ee] font-sans"
+    style="grid-template-columns: 280px 1fr; grid-template-rows: 1fr auto; grid-template-areas: 'sidebar content' 'player player';"
+>
+    <aside
+        class="flex flex-col overflow-hidden bg-[#0a0c10] border-r border-[#1d2230]"
+        style="grid-area: sidebar;"
+    >
+        <div
+            class="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-[#1d2230]"
+        >
+            <h2
+                class="m-0 text-xs font-semibold tracking-[0.08em] uppercase text-[#8b93a7]"
             >
-              <span class="folder-name">{folder.name}</span>
-              <span class="folder-count">{folder.tracks.length}</span>
-            </button>
-            <div class="folder-actions">
-              <button class="icon-btn" title="Play" onclick={() => player.playFolder(folder.path, 0)}>▶</button>
-              <button class="icon-btn" title="Rescan" onclick={() => player.rescan(folder.path)}>↻</button>
-              <button class="icon-btn danger" title="Remove" onclick={() => player.removeFolder(folder.path)}>✕</button>
-            </div>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </aside>
-
-  <section class="content">
-    <header class="content-head">
-      {#if player.activeFolder}
-        <div>
-          <h1>{player.activeFolder.name}</h1>
-          <p class="path">{player.activeFolder.path}</p>
+                Folders
+            </h2>
+            <button
+                class="w-7 h-7 rounded-md border border-[#2a3245] bg-[#161a24] text-[#e7e9ee] text-lg cursor-pointer hover:bg-[#1e2433]"
+                onclick={() => player.addFolder()}
+                title="Import folder">+</button
+            >
         </div>
-        <button class="play-all" onclick={() => player.activeFolder && player.playFolder(player.activeFolder.path, 0)}>
-          Play all
-        </button>
-      {:else}
-        <div>
-          <h1>mud-player</h1>
-          <p class="path">Import a folder to begin</p>
-        </div>
-      {/if}
-    </header>
 
-    <div class="track-list">
-      {#if player.activeFolder}
-        {#if player.activeFolder.tracks.length === 0}
-          <p class="empty">No audio files in this folder.</p>
+        {#if player.folders.length === 0}
+            <p class="text-[#8b93a7] p-4 text-[13px]">
+                No folders yet. Click + to import.
+            </p>
         {:else}
-          {#each player.activeFolder.tracks as track, i (trackKey(track))}
-            <button
-              class="track"
-              class:playing={player.currentTrack?.path === track.path}
-              ondblclick={() => player.playFolder(track.folder, i)}
-              onclick={() => player.playFolder(track.folder, i)}
-            >
-              <span class="track-num">{i + 1}</span>
-              <span class="track-name">{track.name}</span>
-              {#if player.currentTrack?.path === track.path}
-                <span class="now">{player.isPlaying ? "♪" : "❚❚"}</span>
-              {/if}
-            </button>
-          {/each}
+            <ul class="list-none m-0 p-1.5 overflow-y-auto">
+                {#each player.folders as folder (folder.path)}
+                    <li
+                        class={[
+                            "group flex items-center gap-1 px-1 py-0.5 rounded-lg",
+                            folder.path === player.activeFolderPath &&
+                                "bg-[#1a2030]",
+                        ]}
+                    >
+                        <button
+                            class="flex-1 flex items-center justify-between gap-2 px-2.5 py-2 bg-transparent border-none text-inherit text-left cursor-pointer rounded-md text-[13px] min-w-0 hover:bg-[#161c28]"
+                            ondblclick={() => player.playFolder(folder.path, 0)}
+                            onclick={() => player.selectFolder(folder.path)}
+                            title={folder.path}
+                        >
+                            <span
+                                class="overflow-hidden text-ellipsis whitespace-nowrap"
+                                >{folder.name}</span
+                            >
+                            <span
+                                class="text-[11px] text-[#8b93a7] bg-[#161c28] px-1.5 py-px rounded-full"
+                                >{folder.tracks.length}</span
+                            >
+                        </button>
+                        <div class="hidden gap-0.5 group-hover:flex">
+                            <button
+                                class="bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer text-xs hover:bg-[#1e2433] hover:text-[#e7e9ee]"
+                                title="Play"
+                                onclick={() =>
+                                    player.playFolder(folder.path, 0)}>▶</button
+                            >
+                            <button
+                                class="bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer text-xs hover:bg-[#1e2433] hover:text-[#e7e9ee]"
+                                title="Rescan"
+                                onclick={() => player.rescan(folder.path)}
+                                >↻</button
+                            >
+                            <button
+                                class="bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer text-xs hover:bg-[#1e2433] hover:text-[#ff7676]"
+                                title="Remove"
+                                onclick={() => player.removeFolder(folder.path)}
+                                >✕</button
+                            >
+                        </div>
+                    </li>
+                {/each}
+            </ul>
         {/if}
-      {/if}
-    </div>
-  </section>
+    </aside>
 
-  <footer class="player-bar">
-    <div class="player-info">
-      {#if player.currentTrack}
-        <div class="now-name">{player.currentTrack.name}</div>
-        <div class="now-folder">{player.currentTrack.folder}</div>
-      {:else}
-        <div class="now-name muted">Nothing playing</div>
-      {/if}
-    </div>
+    <section class="flex flex-col overflow-hidden" style="grid-area: content;">
+        <header class="flex items-center justify-between px-7 pt-6 pb-3">
+            {#if player.activeFolder}
+                <div>
+                    <h1 class="m-0 text-[26px] font-bold">
+                        {player.activeFolder.name}
+                    </h1>
+                    <p class="mt-1 mb-0 text-[#8b93a7] text-xs">
+                        {player.activeFolder.path}
+                    </p>
+                </div>
+                <button
+                    class="px-[18px] py-2.5 bg-[#4d7cff] border-none rounded-full text-white font-semibold cursor-pointer hover:bg-[#5b87ff]"
+                    onclick={() =>
+                        player.activeFolder &&
+                        player.playFolder(player.activeFolder.path, 0)}
+                    >Play all</button
+                >
+            {:else}
+                <div>
+                    <h1 class="m-0 text-[26px] font-bold">mud-player</h1>
+                    <p class="mt-1 mb-0 text-[#8b93a7] text-xs">
+                        Import a folder to begin
+                    </p>
+                </div>
+            {/if}
+        </header>
 
-    <div class="player-controls">
-      <button
-        class="toggle"
-        class:on={player.shuffle}
-        title="Shuffle"
-        onclick={() => player.toggleShuffle()}
-      >⇄</button>
-      <button class="ctrl" title="Previous" onclick={() => player.prev()}>⏮</button>
-      <button class="ctrl primary" title="Play/Pause" onclick={() => player.togglePlay()}>
-        {player.isPlaying ? "⏸" : "▶"}
-      </button>
-      <button class="ctrl" title="Next" onclick={() => player.next(true)}>⏭</button>
-      <button
-        class="toggle"
-        class:on={player.repeat !== "off"}
-        title={player.repeat === "one" ? "Repeat one" : player.repeat === "all" ? "Repeat list" : "Repeat off"}
-        onclick={() => player.cycleRepeat()}
-      >
-        {player.repeat === "one" ? "🔂" : "🔁"}
-      </button>
-    </div>
+        <div class="flex-1 overflow-y-auto px-[18px] pb-3.5">
+            {#if player.activeFolder}
+                {#if player.activeFolder.tracks.length === 0}
+                    <p class="text-[#8b93a7] p-4 text-[13px]">
+                        No audio files in this folder.
+                    </p>
+                {:else}
+                    {#each player.activeFolder.tracks as track, i (trackKey(track))}
+                        <button
+                            class={[
+                                "flex items-center gap-3.5 w-full px-3 py-2.5 bg-transparent border-none rounded-lg cursor-pointer text-left text-sm hover:bg-[#161c28]",
+                                player.currentTrack?.path === track.path
+                                    ? "bg-[#1b2237] text-[#b8c5ff]"
+                                    : "text-inherit",
+                            ]}
+                            ondblclick={() =>
+                                player.playFolder(track.folder, i)}
+                            onclick={() => player.playFolder(track.folder, i)}
+                        >
+                            <span
+                                class="w-7 text-right text-[#8b93a7] tabular-nums"
+                                >{i + 1}</span
+                            >
+                            <span
+                                class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                                >{track.name}</span
+                            >
+                            {#if player.currentTrack?.path === track.path}
+                                <span class="text-[#6e8bff]"
+                                    >{player.isPlaying ? "♪" : "❚❚"}</span
+                                >
+                            {/if}
+                        </button>
+                    {/each}
+                {/if}
+            {/if}
+        </div>
+    </section>
 
-    <div class="player-scrub">
-      <span class="time">{fmt(player.currentTime)}</span>
-      <input
-        type="range"
-        min="0"
-        max={player.duration || 0}
-        step="0.1"
-        value={player.currentTime}
-        oninput={onScrub}
-        disabled={!player.currentTrack}
-      />
-      <span class="time">{fmt(player.duration)}</span>
-    </div>
+    <footer
+        class="grid items-center gap-4 px-[18px] py-3 bg-[#0a0c10] border-t border-[#1d2230]"
+        style="grid-area: player; grid-template-columns: 260px 1fr 200px; grid-template-rows: auto auto;"
+    >
+        <div class="min-w-0" style="grid-row: 1 / span 2;">
+            {#if player.currentTrack}
+                <div
+                    class="font-semibold text-sm overflow-hidden text-ellipsis whitespace-nowrap"
+                >
+                    {player.currentTrack.name}
+                </div>
+                <div
+                    class="text-[11px] text-[#8b93a7] overflow-hidden text-ellipsis whitespace-nowrap"
+                >
+                    {player.currentTrack.folder}
+                </div>
+            {:else}
+                <div class="text-sm text-[#8b93a7]">Nothing playing</div>
+            {/if}
+        </div>
 
-    <div class="player-volume">
-      <span class="vol-ic">🔊</span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={player.volume}
-        oninput={onVolume}
-      />
-    </div>
-  </footer>
+        <div
+            class="flex items-center justify-center gap-2.5"
+            style="grid-column: 2; grid-row: 1;"
+        >
+            <button
+                class={[
+                    "bg-transparent border-none w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]",
+                    player.shuffle ? "text-[#6e8bff]" : "text-[#cdd3e0]",
+                ]}
+                title="Shuffle"
+                onclick={() => player.toggleShuffle()}>⇄</button
+            >
+            <button
+                class="bg-transparent border-none text-[#cdd3e0] w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]"
+                title="Previous"
+                onclick={() => player.prev()}>⏮</button
+            >
+            <button
+                class="bg-[#e7e9ee] text-[#0f1115] border-none w-10 h-10 rounded-full text-base cursor-pointer hover:bg-white"
+                title="Play/Pause"
+                onclick={() => player.togglePlay()}
+                >{player.isPlaying ? "⏸" : "▶"}</button
+            >
+            <button
+                class="bg-transparent border-none text-[#cdd3e0] w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]"
+                title="Next"
+                onclick={() => player.next(true)}>⏭</button
+            >
+            <button
+                class={[
+                    "bg-transparent border-none w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]",
+                    player.repeat !== "off"
+                        ? "text-[#6e8bff]"
+                        : "text-[#cdd3e0]",
+                ]}
+                title={player.repeat === "one"
+                    ? "Repeat one"
+                    : player.repeat === "all"
+                      ? "Repeat list"
+                      : "Repeat off"}
+                onclick={() => player.cycleRepeat()}
+                >{player.repeat === "one" ? "🔂" : "🔁"}</button
+            >
+        </div>
 
-  {#if player.streamUrl}
-    <audio
-      bind:this={audio}
-      src={player.streamUrl}
-      ontimeupdate={onTimeUpdate}
-      onloadedmetadata={onLoadedMeta}
-      onended={() => player.onEnded()}
-      preload="auto"
-    ></audio>
-  {/if}
+        <div
+            class="flex items-center gap-2.5"
+            style="grid-column: 2; grid-row: 2;"
+        >
+            <span
+                class="text-[11px] text-[#8b93a7] tabular-nums min-w-9 text-center"
+                >{fmt(player.currentTime)}</span
+            >
+            <input
+                class="player-range flex-1"
+                type="range"
+                min="0"
+                max={player.duration || 0}
+                step="0.1"
+                value={player.currentTime}
+                oninput={onScrub}
+                disabled={!player.currentTrack}
+            />
+            <span
+                class="text-[11px] text-[#8b93a7] tabular-nums min-w-9 text-center"
+                >{fmt(player.duration)}</span
+            >
+        </div>
+
+        <div class="flex items-center gap-2" style="grid-row: 1 / span 2;">
+            <span class="text-sm text-[#8b93a7]">🔊</span>
+            <input
+                class="player-range flex-1"
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={player.volume}
+                oninput={onVolume}
+            />
+        </div>
+    </footer>
+
+    {#if player.streamUrl}
+        <audio
+            bind:this={audio}
+            src={player.streamUrl}
+            ontimeupdate={onTimeUpdate}
+            onloadedmetadata={onLoadedMeta}
+            onended={() => player.onEnded()}
+            preload="auto"
+        ></audio>
+    {/if}
 </main>
 
 <style>
-  main {
-    display: grid;
-    grid-template-columns: 280px 1fr;
-    grid-template-rows: 1fr auto;
-    grid-template-areas:
-      "sidebar content"
-      "player player";
-    height: 100vh;
-    background: #0f1115;
-    color: #e7e9ee;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  }
-
-  .sidebar {
-    grid-area: sidebar;
-    background: #0a0c10;
-    border-right: 1px solid #1d2230;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .sidebar-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px 10px;
-    border-bottom: 1px solid #1d2230;
-  }
-  .sidebar-head h2 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #8b93a7;
-  }
-  .add {
-    width: 28px; height: 28px;
-    border-radius: 6px;
-    border: 1px solid #2a3245;
-    background: #161a24;
-    color: #e7e9ee;
-    font-size: 18px;
-    cursor: pointer;
-  }
-  .add:hover { background: #1e2433; }
-
-  .folder-list {
-    list-style: none;
-    margin: 0; padding: 6px;
-    overflow-y: auto;
-  }
-  .folder-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 4px;
-    border-radius: 8px;
-  }
-  .folder-item.active { background: #1a2030; }
-  .folder-main {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 8px 10px;
-    background: transparent;
-    border: none;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    border-radius: 6px;
-    font-size: 13px;
-    min-width: 0;
-  }
-  .folder-main:hover { background: #161c28; }
-  .folder-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .folder-count {
-    font-size: 11px;
-    color: #8b93a7;
-    background: #161c28;
-    padding: 1px 6px;
-    border-radius: 10px;
-  }
-  .folder-actions {
-    display: none;
-    gap: 2px;
-  }
-  .folder-item:hover .folder-actions { display: flex; }
-  .icon-btn {
-    background: transparent;
-    border: none;
-    color: #8b93a7;
-    width: 24px; height: 24px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  .icon-btn:hover { background: #1e2433; color: #e7e9ee; }
-  .icon-btn.danger:hover { color: #ff7676; }
-
-  .content {
-    grid-area: content;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  .content-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 24px 28px 12px;
-  }
-  .content-head h1 { margin: 0; font-size: 26px; font-weight: 700; }
-  .path {
-    margin: 4px 0 0;
-    color: #8b93a7;
-    font-size: 12px;
-  }
-  .play-all {
-    padding: 10px 18px;
-    background: #4d7cff;
-    border: none;
-    border-radius: 999px;
-    color: white;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .play-all:hover { background: #5b87ff; }
-
-  .track-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 6px 18px 14px;
-  }
-  .track {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    width: 100%;
-    padding: 10px 12px;
-    background: transparent;
-    border: none;
-    color: inherit;
-    border-radius: 8px;
-    cursor: pointer;
-    text-align: left;
-    font-size: 14px;
-  }
-  .track:hover { background: #161c28; }
-  .track.playing { background: #1b2237; color: #b8c5ff; }
-  .track-num {
-    width: 28px;
-    text-align: right;
-    color: #8b93a7;
-    font-variant-numeric: tabular-nums;
-  }
-  .track-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .now { color: #6e8bff; }
-
-  .empty {
-    color: #8b93a7;
-    padding: 16px;
-    font-size: 13px;
-  }
-
-  .player-bar {
-    grid-area: player;
-    display: grid;
-    grid-template-columns: 260px 1fr 200px;
-    align-items: center;
-    gap: 16px;
-    padding: 12px 18px;
-    background: #0a0c10;
-    border-top: 1px solid #1d2230;
-  }
-
-  .player-info {
-    min-width: 0;
-  }
-  .now-name {
-    font-weight: 600;
-    font-size: 14px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .now-name.muted { color: #8b93a7; font-weight: 400; }
-  .now-folder {
-    font-size: 11px;
-    color: #8b93a7;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .player-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-  }
-  .ctrl, .toggle {
-    background: transparent;
-    border: none;
-    color: #cdd3e0;
-    font-size: 18px;
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    cursor: pointer;
-  }
-  .ctrl:hover, .toggle:hover { background: #161c28; }
-  .ctrl.primary {
-    background: #e7e9ee;
-    color: #0f1115;
-    width: 40px; height: 40px;
-    font-size: 16px;
-  }
-  .ctrl.primary:hover { background: white; }
-  .toggle.on { color: #6e8bff; }
-
-  .player-scrub {
-    grid-column: 2;
-    grid-row: 2;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .player-bar {
-    grid-template-rows: auto auto;
-  }
-  .player-info { grid-row: 1 / span 2; }
-  .player-volume { grid-row: 1 / span 2; }
-  .time {
-    font-size: 11px;
-    color: #8b93a7;
-    font-variant-numeric: tabular-nums;
-    min-width: 36px;
-    text-align: center;
-  }
-  .player-scrub input,
-  .player-volume input {
-    flex: 1;
-    appearance: none;
-    height: 4px;
-    background: #1d2230;
-    border-radius: 2px;
-    outline: none;
-  }
-  .player-scrub input::-webkit-slider-thumb,
-  .player-volume input::-webkit-slider-thumb {
-    appearance: none;
-    width: 12px; height: 12px;
-    background: #e7e9ee;
-    border-radius: 50%;
-    cursor: pointer;
-  }
-  .player-volume {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .vol-ic { font-size: 14px; color: #8b93a7; }
+    :global(.player-range) {
+        appearance: none;
+        height: 4px;
+        background: #1d2230;
+        border-radius: 2px;
+        outline: none;
+    }
+    :global(.player-range::-webkit-slider-thumb) {
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        background: #e7e9ee;
+        border-radius: 50%;
+        cursor: pointer;
+    }
 </style>
