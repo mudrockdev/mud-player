@@ -217,13 +217,29 @@ function updateTray(state: PlayerState) {
 	playerState = state;
 	if (!tray) return;
 	tray.setTitle(buildTrayTitle(state));
-	tray.setMenu(buildTrayMenu(state));
+	tray.setMenu(buildTrayMenu(state, windowHidden));
+}
+
+let windowHidden = false;
+
+function toggleMainWindow() {
+	if (windowHidden) {
+		mainWindow.show();
+		mainWindow.activate();
+		windowHidden = false;
+	} else {
+		mainWindow.hide();
+		windowHidden = true;
+	}
+	// Refresh the menu so the entry's label flips between Show/Hide.
+	updateTray(playerState);
 }
 
 tray?.on("tray-clicked", (event) => {
 	const action = (event as { data?: { action?: string } }).data?.action;
 	const click = classifyTrayClick(action);
-	if (click.kind === "quit") Utils.quit();
+	if (click.kind === "icon" || click.kind === "toggle-window") toggleMainWindow();
+	else if (click.kind === "quit") Utils.quit();
 	else if (click.kind === "player") sendTrayAction(click.action);
 });
 

@@ -81,6 +81,33 @@ describe("buildTrayMenu — idle state", () => {
 	});
 });
 
+describe("buildTrayMenu — window toggle entry", () => {
+	test("reads 'Hide window' while the window is visible", () => {
+		const entry = buildTrayMenu(playing, false).find(
+			(m) => m.type === "normal" && m.action === "toggle-window",
+		);
+		if (!entry || entry.type !== "normal") throw new Error("missing toggle-window entry");
+		expect(entry.label).toBe("Hide window");
+	});
+
+	test("reads 'Show window' while the window is hidden", () => {
+		const entry = buildTrayMenu(playing, true).find(
+			(m) => m.type === "normal" && m.action === "toggle-window",
+		);
+		if (!entry || entry.type !== "normal") throw new Error("missing toggle-window entry");
+		expect(entry.label).toBe("Show window");
+	});
+
+	test("the toggle is always clickable even with no track loaded", () => {
+		const entry = buildTrayMenu(idle, false).find(
+			(m) => m.type === "normal" && m.action === "toggle-window",
+		);
+		if (!entry || entry.type !== "normal") throw new Error("missing toggle-window entry");
+		// enabled is omitted (truthy by default in Electrobun's menu schema)
+		expect(entry.enabled === undefined || entry.enabled).toBeTruthy();
+	});
+});
+
 describe("buildTrayMenu — playing state", () => {
 	const menu = buildTrayMenu(playing);
 
@@ -142,13 +169,20 @@ describe("buildTrayMenu — paused state", () => {
 });
 
 describe("classifyTrayClick", () => {
-	test("treats missing/empty action as ignore (e.g. icon-only click)", () => {
+	test("classifies an icon left-click (empty action) as 'icon'", () => {
+		expect(classifyTrayClick("")).toEqual({ kind: "icon" });
+	});
+
+	test("ignores when there's no payload at all", () => {
 		expect(classifyTrayClick(undefined)).toEqual({ kind: "ignore" });
-		expect(classifyTrayClick("")).toEqual({ kind: "ignore" });
 	});
 
 	test("routes quit", () => {
 		expect(classifyTrayClick("quit")).toEqual({ kind: "quit" });
+	});
+
+	test("routes the toggle-window menu entry", () => {
+		expect(classifyTrayClick("toggle-window")).toEqual({ kind: "toggle-window" });
 	});
 
 	test("routes all four player actions", () => {
