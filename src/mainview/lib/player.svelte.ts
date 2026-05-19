@@ -30,7 +30,6 @@ function createPlayer() {
 	// ── Headless videojs audio player ──────────────────────────────────────
 	const audioEl = new Audio();
 	audioEl.preload = "auto";
-	audioEl.crossOrigin = "anonymous";
 
 	const vjs = createStore<PlayerTarget>()(
 		combine(...audioFeatures),
@@ -61,27 +60,26 @@ function createPlayer() {
 	const currentTrack = $derived(
 		queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null,
 	);
-	const streamUrl = $derived(
-		currentTrack && streamPort
-			? `http://127.0.0.1:${streamPort}/audio?path=${encodeURIComponent(currentTrack.path)}`
-			: "",
-	);
 	const isPlaying = $derived(!paused);
 
-	// Keep the engine's source in sync with the current track.
-	$effect.root(() => {
-		$effect(() => {
-			const url = streamUrl;
-			if (!url) return;
-			if (vjs.state.source !== url) {
-				vjs.loadSource(url);
-				// Play newly-loaded source unless user explicitly paused.
-				if (!pausedByUser) void vjs.play().catch(() => {});
-			}
-		});
-	});
 
-	let pausedByUser = false;
+	function streamUrlFor(track: Track | null): string {
+		if (!track || !streamPort) return "";
+		return `http://127.0.0.1:${streamPort}/audio?path=${encodeURIComponent(track.path)}`;
+	}
+
+	// Load the source for the given queue index and start playback immediately
+	// from inside the user-gesture call so autoplay policies don't block it.
+	function loadAndPlay(index: number) {
+		queueIndex = Math.min(Math.max(index, 0), queue.length - 1);
+		const track = queue[queueIndex];
+		const url = streamUrlFor(track);
+		if (!url) return;
+		vjs.loadSource(url);
+		void vjs.play().catch((err) => {
+			console.error("[player] play() failed:", err);
+		});
+	}
 
 	// ── Helpers ────────────────────────────────────────────────────────────
 	function buildShuffleOrder(startWith: number) {
@@ -144,10 +142,9 @@ function createPlayer() {
 		if (!folder || folder.tracks.length === 0) return;
 		activeFolderPath = path;
 		queue = folder.tracks.slice();
-		queueIndex = Math.min(Math.max(startIndex, 0), queue.length - 1);
-		if (shuffle) buildShuffleOrder(queueIndex);
-		pausedByUser = false;
-		// The $effect on streamUrl will load + play the new source.
+		const idx = Math.min(Math.max(startIndex, 0), queue.length - 1);
+		if (shuffle) buildShuffleOrder(idx);
+		loadAndPlay(idx);
 	}
 
 	function playTrack(track: Track) {
@@ -164,16 +161,13 @@ function createPlayer() {
 			return;
 		}
 		if (paused) {
-			pausedByUser = false;
-			void vjs.play().catch(() => {});
+				void vjs.play().catch(() => {});
 		} else {
-			pausedByUser = true;
-			vjs.pause();
+				vjs.pause();
 		}
 	}
 
 	function stop() {
-		pausedByUser = true;
 		vjs.pause();
 		queue = [];
 		queueIndex = -1;
@@ -185,33 +179,27 @@ function createPlayer() {
 			if (shuffleOrder.length !== queue.length) buildShuffleOrder(Math.max(queueIndex, 0));
 			if (shufflePos + 1 < shuffleOrder.length) {
 				shufflePos += 1;
-				queueIndex = shuffleOrder[shufflePos];
-				pausedByUser = false;
+				loadAndPlay(shuffleOrder[shufflePos]);
 				return;
 			}
 			if (repeat === "all") {
 				buildShuffleOrder(-1);
 				shufflePos = 0;
-				queueIndex = shuffleOrder[0];
-				pausedByUser = false;
+				loadAndPlay(shuffleOrder[0]);
 				return;
 			}
 			if (userInitiated) queueIndex = shuffleOrder[shuffleOrder.length - 1];
-			pausedByUser = true;
-			vjs.pause();
+				vjs.pause();
 			return;
 		}
 		if (queueIndex + 1 < queue.length) {
-			queueIndex += 1;
-			pausedByUser = false;
+			loadAndPlay(queueIndex + 1);
 			return;
 		}
 		if (repeat === "all") {
-			queueIndex = 0;
-			pausedByUser = false;
+			loadAndPlay(0);
 			return;
 		}
-		pausedByUser = true;
 		vjs.pause();
 	}
 
@@ -224,20 +212,15 @@ function createPlayer() {
 		if (shuffle) {
 			if (shufflePos > 0) {
 				shufflePos -= 1;
-				queueIndex = shuffleOrder[shufflePos];
-				pausedByUser = false;
+				loadAndPlay(shuffleOrder[shufflePos]);
 			}
 			return;
 		}
 		if (queueIndex > 0) {
-			queueIndex -= 1;
-			pausedByUser = false;
+			loadAndPlay(queueIndex - 1);
 			return;
 		}
-		if (repeat === "all") {
-			queueIndex = queue.length - 1;
-			pausedByUser = false;
-		}
+		if (repeat === "all") loadAndPlay(queue.length - 1);
 	}
 
 	function toggleShuffle() {
