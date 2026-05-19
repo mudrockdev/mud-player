@@ -1,5 +1,18 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import {
+        Pause,
+        Play,
+        Plus,
+        Repeat,
+        Repeat1,
+        RotateCw,
+        Shuffle,
+        SkipBack,
+        SkipForward,
+        Volume2,
+        X,
+    } from "@lucide/svelte";
     import { player } from "./lib/player.svelte";
 
     let audio: HTMLAudioElement | undefined = $state();
@@ -69,10 +82,13 @@
                 Folders
             </h2>
             <button
-                class="w-7 h-7 rounded-md border border-[#2a3245] bg-[#161a24] text-[#e7e9ee] text-lg cursor-pointer hover:bg-[#1e2433]"
+                class="flex items-center justify-center w-7 h-7 rounded-md border border-[#2a3245] bg-[#161a24] text-[#e7e9ee] cursor-pointer hover:bg-[#1e2433]"
                 onclick={() => player.addFolder()}
-                title="Import folder">+</button
+                title="Import folder"
+                aria-label="Import folder"
             >
+                <Plus size={16} />
+            </button>
         </div>
 
         {#if player.folders.length === 0}
@@ -106,23 +122,30 @@
                         </button>
                         <div class="hidden gap-0.5 group-hover:flex">
                             <button
-                                class="bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer text-xs hover:bg-[#1e2433] hover:text-[#e7e9ee]"
+                                class="flex items-center justify-center bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer hover:bg-[#1e2433] hover:text-[#e7e9ee]"
                                 title="Play"
+                                aria-label="Play folder"
                                 onclick={() =>
-                                    player.playFolder(folder.path, 0)}>▶</button
+                                    player.playFolder(folder.path, 0)}
                             >
+                                <Play size={14} />
+                            </button>
                             <button
-                                class="bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer text-xs hover:bg-[#1e2433] hover:text-[#e7e9ee]"
+                                class="flex items-center justify-center bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer hover:bg-[#1e2433] hover:text-[#e7e9ee]"
                                 title="Rescan"
+                                aria-label="Rescan folder"
                                 onclick={() => player.rescan(folder.path)}
-                                >↻</button
                             >
+                                <RotateCw size={14} />
+                            </button>
                             <button
-                                class="bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer text-xs hover:bg-[#1e2433] hover:text-[#ff7676]"
+                                class="flex items-center justify-center bg-transparent border-none text-[#8b93a7] w-6 h-6 rounded cursor-pointer hover:bg-[#1e2433] hover:text-[#ff7676]"
                                 title="Remove"
+                                aria-label="Remove folder"
                                 onclick={() => player.removeFolder(folder.path)}
-                                >✕</button
                             >
+                                <X size={14} />
+                            </button>
                         </div>
                     </li>
                 {/each}
@@ -186,9 +209,13 @@
                                 >{track.name}</span
                             >
                             {#if player.currentTrack?.path === track.path}
-                                <span class="text-[#6e8bff]"
-                                    >{player.isPlaying ? "♪" : "❚❚"}</span
-                                >
+                                <span class="flex items-center text-[#6e8bff]">
+                                    {#if player.isPlaying}
+                                        <Play size={14} />
+                                    {:else}
+                                        <Pause size={14} />
+                                    {/if}
+                                </span>
                             {/if}
                         </button>
                     {/each}
@@ -224,31 +251,46 @@
         >
             <button
                 class={[
-                    "bg-transparent border-none w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]",
+                    "flex items-center justify-center bg-transparent border-none w-9 h-9 rounded-full cursor-pointer hover:bg-[#161c28]",
                     player.shuffle ? "text-[#6e8bff]" : "text-[#cdd3e0]",
                 ]}
                 title="Shuffle"
-                onclick={() => player.toggleShuffle()}>⇄</button
+                aria-label="Shuffle"
+                onclick={() => player.toggleShuffle()}
             >
+                <Shuffle size={18} />
+            </button>
             <button
-                class="bg-transparent border-none text-[#cdd3e0] w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]"
+                class="flex items-center justify-center bg-transparent border-none text-[#cdd3e0] w-9 h-9 rounded-full cursor-pointer hover:bg-[#161c28]"
                 title="Previous"
-                onclick={() => player.prev()}>⏮</button
+                aria-label="Previous"
+                onclick={() => player.prev()}
             >
+                <SkipBack size={18} />
+            </button>
             <button
-                class="bg-[#e7e9ee] text-[#0f1115] border-none w-10 h-10 rounded-full text-base cursor-pointer hover:bg-white"
+                class="flex items-center justify-center bg-[#e7e9ee] text-[#0f1115] border-none w-10 h-10 rounded-full cursor-pointer hover:bg-white"
                 title="Play/Pause"
+                aria-label={player.isPlaying ? "Pause" : "Play"}
                 onclick={() => player.togglePlay()}
-                >{player.isPlaying ? "⏸" : "▶"}</button
             >
+                {#if player.isPlaying}
+                    <Pause size={18} />
+                {:else}
+                    <Play size={18} />
+                {/if}
+            </button>
             <button
-                class="bg-transparent border-none text-[#cdd3e0] w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]"
+                class="flex items-center justify-center bg-transparent border-none text-[#cdd3e0] w-9 h-9 rounded-full cursor-pointer hover:bg-[#161c28]"
                 title="Next"
-                onclick={() => player.next(true)}>⏭</button
+                aria-label="Next"
+                onclick={() => player.next(true)}
             >
+                <SkipForward size={18} />
+            </button>
             <button
                 class={[
-                    "bg-transparent border-none w-9 h-9 rounded-full text-lg cursor-pointer hover:bg-[#161c28]",
+                    "flex items-center justify-center bg-transparent border-none w-9 h-9 rounded-full cursor-pointer hover:bg-[#161c28]",
                     player.repeat !== "off"
                         ? "text-[#6e8bff]"
                         : "text-[#cdd3e0]",
@@ -258,9 +300,15 @@
                     : player.repeat === "all"
                       ? "Repeat list"
                       : "Repeat off"}
+                aria-label="Repeat"
                 onclick={() => player.cycleRepeat()}
-                >{player.repeat === "one" ? "🔂" : "🔁"}</button
             >
+                {#if player.repeat === "one"}
+                    <Repeat1 size={18} />
+                {:else}
+                    <Repeat size={18} />
+                {/if}
+            </button>
         </div>
 
         <div
@@ -288,7 +336,9 @@
         </div>
 
         <div class="flex items-center gap-2" style="grid-row: 1 / span 2;">
-            <span class="text-sm text-[#8b93a7]">🔊</span>
+            <span class="flex items-center text-[#8b93a7]">
+                <Volume2 size={16} />
+            </span>
             <input
                 class="player-range flex-1"
                 type="range"
