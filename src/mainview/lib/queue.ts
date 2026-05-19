@@ -7,18 +7,29 @@ export type QueueState = {
 	shuffleOrder: number[];
 	shufflePos: number;
 	repeat: RepeatMode;
+	/**
+	 * Stack of indices that were playing before the current one, most-recent at
+	 * the end. Survives shuffle toggles and manual track picks so the back
+	 * button can always walk you through what you actually listened to.
+	 */
+	history: number[];
 };
 
 export type QueueResult =
-	| { kind: "play"; index: number; shuffleOrder?: number[]; shufflePos?: number }
-	| { kind: "stop"; index?: number }
+	| {
+			kind: "play";
+			index: number;
+			history: number[];
+			shuffleOrder?: number[];
+			shufflePos?: number;
+	  }
+	| { kind: "stop"; index?: number; history?: number[] }
+	| { kind: "restart" }
 	| { kind: "noop" };
 
 /**
  * Build a shuffled permutation of `[0, length)`. If `startWith` is in range,
  * the result has it at position 0 so playback starts on that track.
- *
- * Pure aside from `Math.random` — pass `rng` to make it deterministic.
  */
 export function buildShuffleOrder(
 	length: number,
@@ -38,6 +49,13 @@ export function buildShuffleOrder(
 	return order;
 }
 
+/** Append `current` to `history`, deduplicating consecutive entries. */
+export function pushHistory(history: number[], current: number): number[] {
+	if (current < 0) return history;
+	if (history.length && history[history.length - 1] === current) return history;
+	return [...history, current];
+}
+
 /** Decide the next track when the user (or `ended`) advances. */
 export function nextTrack(
 	state: QueueState,
@@ -45,6 +63,7 @@ export function nextTrack(
 	rng: () => number = Math.random,
 ): QueueResult {
 	if (state.length === 0) return { kind: "noop" };
+	const history = pushHistory(state.history, state.index);
 
 	if (state.shuffle) {
 		const order =
@@ -55,11 +74,23 @@ export function nextTrack(
 			state.shuffleOrder.length === state.length ? state.shufflePos : 0;
 
 		if (pos + 1 < order.length) {
-			return { kind: "play", index: order[pos + 1], shuffleOrder: order, shufflePos: pos + 1 };
+			return {
+				kind: "play",
+				index: order[pos + 1],
+				history,
+				shuffleOrder: order,
+				shufflePos: pos + 1,
+			};
 		}
 		if (state.repeat === "all") {
 			const fresh = buildShuffleOrder(state.length, -1, rng);
-			return { kind: "play", index: fresh[0], shuffleOrder: fresh, shufflePos: 0 };
+			return {
+				kind: "play",
+				index: fresh[0],
+				history,
+				shuffleOrder: fresh,
+				shufflePos: 0,
+			};
 		}
 		return {
 			kind: "stop",
@@ -68,33 +99,46 @@ export function nextTrack(
 	}
 
 	if (state.index + 1 < state.length) {
-		return { kind: "play", index: state.index + 1 };
+		return { kind: "play", index: state.index + 1, history };
 	}
-	if (state.repeat === "all") return { kind: "play", index: 0 };
+	if (state.repeat === "all") return { kind: "play", index: 0, history };
 	return { kind: "stop" };
 }
 
-/** Decide the previous track. `currentTime` lets us implement "restart if >3s". */
-export function prevTrack(
-	state: QueueState,
-	currentTime: number,
-): QueueResult | { kind: "restart" } {
+/**
+ * Decide the previous track.
+ *
+ * - If `currentTime > 3` we restart the current track (typical media-player
+ *   behavior so users can quickly seek to the beginning).
+ * - Otherwise, pop the play history if we have any. This is the path that
+ *   keeps "back" useful after shuffle is enabled or a track is manually
+ *   picked from the list.
+ * - With no history we fall back to linear `index-1` (or wrap on repeat=all)
+ *   so an untouched, never-shuffled queue still behaves linearly.
+ */
+export function prevTrack(state: QueueState, currentTime: number): QueueResult {
 	if (state.length === 0) return { kind: "noop" };
 	if (currentTime > 3) return { kind: "restart" };
 
-	if (state.shuffle) {
-		if (state.shufflePos > 0) {
-			return {
-				kind: "play",
-				index: state.shuffleOrder[state.shufflePos - 1],
-				shufflePos: state.shufflePos - 1,
-			};
+	if (state.history.length > 0) {
+		const target = state.history[state.history.length - 1];
+		const history = state.history.slice(0, -1);
+		const result: QueueResult = { kind: "play", index: target, history };
+		if (state.shuffle && state.shuffleOrder.length === state.length) {
+			const newPos = state.shuffleOrder.indexOf(target);
+			if (newPos >= 0) result.shufflePos = newPos;
 		}
-		return { kind: "noop" };
+		return result;
 	}
 
-	if (state.index > 0) return { kind: "play", index: state.index - 1 };
-	if (state.repeat === "all") return { kind: "play", index: state.length - 1 };
+	if (state.shuffle) return { kind: "noop" };
+
+	if (state.index > 0) {
+		return { kind: "play", index: state.index - 1, history: [] };
+	}
+	if (state.repeat === "all") {
+		return { kind: "play", index: state.length - 1, history: [] };
+	}
 	return { kind: "noop" };
 }
 

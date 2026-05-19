@@ -1,4 +1,10 @@
-import { BrowserView, BrowserWindow, Tray, Updater, Utils } from "electrobun/bun";
+import Electrobun, {
+	BrowserView,
+	BrowserWindow,
+	Tray,
+	Updater,
+	Utils,
+} from "electrobun/bun";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -7,8 +13,15 @@ import { db } from "./db";
 import { playlists, songs } from "./db/schema";
 import { listAudioFiles } from "./audio";
 import { createStreamServer } from "./stream-server";
+import { loadSettings, setSetting } from "./settings-store";
 import { buildTrayMenu, buildTrayTitle, classifyTrayClick } from "./tray-menu";
-import type { Folder, MudPlayerRPC, PlayerState, TrayAction } from "../shared/types";
+import type {
+	Folder,
+	MudPlayerRPC,
+	PersistedSettings,
+	PlayerState,
+	TrayAction,
+} from "../shared/types";
 
 const DEV_SERVER_PORT = 5173;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
@@ -163,13 +176,32 @@ const rpc = BrowserView.defineRPC<MudPlayerRPC>({
 			async getStreamPort() {
 				return streamPort;
 			},
+			async loadSettings(): Promise<PersistedSettings> {
+				const s = await loadSettings();
+				return { shuffle: s.shuffle, repeat: s.repeat, volume: s.volume };
+			},
 		},
 		messages: {
 			log: ({ msg }) => console.log("[webview]", msg),
 			playerState: (state) => updateTray(state),
+			saveSettings: (patch) => {
+				void persistSettingsPatch(patch);
+			},
 		},
 	},
 });
+
+async function persistSettingsPatch(patch: Partial<PersistedSettings>) {
+	for (const key of Object.keys(patch) as (keyof PersistedSettings)[]) {
+		const value = patch[key];
+		if (value === undefined) continue;
+		try {
+			await setSetting(key, value as never);
+		} catch (err) {
+			console.warn(`Failed to persist setting ${key}:`, err);
+		}
+	}
+}
 
 let playerState: PlayerState = { hasTrack: false, paused: true, trackName: "" };
 let tray: Tray | null = null;
@@ -247,16 +279,40 @@ updateTray(playerState);
 
 const url = await getMainViewUrl();
 
+const persisted = await loadSettings();
+
 const mainWindow = new BrowserWindow<typeof rpc>({
 	title: "mud-player",
 	url,
 	rpc,
-	frame: {
-		width: 1000,
-		height: 700,
-		x: 200,
-		y: 200,
-	},
+	frame: { ...persisted.windowFrame },
 });
+
+// Persist window frame on resize / move. Debounce so we don't write on every
+// pointer-move during a drag.
+let frameSaveTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleFrameSave(frame: { x: number; y: number; width: number; height: number }) {
+	if (frameSaveTimer) clearTimeout(frameSaveTimer);
+	frameSaveTimer = setTimeout(() => {
+		void setSetting("windowFrame", frame).catch((err) =>
+			console.warn("Failed to persist window frame:", err),
+		);
+	}, 300);
+}
+
+function onWindowGeom(event: unknown) {
+	const data = (event as { data?: { id?: number; x?: number; y?: number; width?: number; height?: number } }).data;
+	if (!data || data.id !== mainWindow.id) return;
+	const next = {
+		x: data.x ?? persisted.windowFrame.x,
+		y: data.y ?? persisted.windowFrame.y,
+		width: data.width ?? persisted.windowFrame.width,
+		height: data.height ?? persisted.windowFrame.height,
+	};
+	scheduleFrameSave(next);
+}
+
+Electrobun.events.on("resize", onWindowGeom);
+Electrobun.events.on("move", onWindowGeom);
 
 console.log("mud-player started");

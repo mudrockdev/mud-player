@@ -8,6 +8,7 @@ import {
 	cycleRepeat as cycleRepeatMode,
 	nextTrack,
 	prevTrack,
+	pushHistory,
 	type QueueState,
 	type RepeatMode,
 } from "./queue";
@@ -26,6 +27,7 @@ function createPlayer() {
 	let streamPort = $state<number>(0);
 	let shuffleOrder = $state<number[]>([]);
 	let shufflePos = $state<number>(-1);
+	let history = $state<number[]>([]);
 
 	// ── Mirror of @videojs/core store state into Svelte runes ──────────────
 	let paused = $state<boolean>(true);
@@ -104,6 +106,7 @@ function createPlayer() {
 			shuffleOrder,
 			shufflePos,
 			repeat,
+			history,
 		};
 	}
 
@@ -114,7 +117,7 @@ function createPlayer() {
 
 	// Load the source for the given queue index and start playback immediately
 	// from inside the user-gesture call so autoplay policies don't block it.
-	function loadAndPlay(index: number) {
+	function setIndexAndPlay(index: number) {
 		queueIndex = Math.min(Math.max(index, 0), queue.length - 1);
 		const track = queue[queueIndex];
 		const url = streamUrlFor(track);
@@ -125,6 +128,14 @@ function createPlayer() {
 		});
 	}
 
+	// Forward navigation: record the current index in history before switching.
+	// Used by manual track picks (playFolder/playTrack) and by next() when the
+	// queue helper didn't already return an explicit history.
+	function loadAndPlay(index: number) {
+		history = pushHistory(history, queueIndex);
+		setIndexAndPlay(index);
+	}
+
 	function handleEnded() {
 		if (repeat === "one") {
 			void vjs.seek(0).then(() => vjs.play().catch(() => {}));
@@ -133,10 +144,31 @@ function createPlayer() {
 		next(false);
 	}
 
+	// ── Settings persistence ───────────────────────────────────────────────
+	let settingsLoaded = false;
+
+	$effect.root(() => {
+		$effect(() => {
+			if (!settingsLoaded) return;
+			try {
+				send.saveSettings({ shuffle, repeat, volume });
+			} catch {}
+		});
+	});
+
 	// ── Library actions ────────────────────────────────────────────────────
 	async function init() {
-		streamPort = await bun.getStreamPort({});
-		folders = await bun.loadFolders({});
+		const [port, savedFolders, settings] = await Promise.all([
+			bun.getStreamPort({}),
+			bun.loadFolders({}),
+			bun.loadSettings({}),
+		]);
+		streamPort = port;
+		folders = savedFolders;
+		shuffle = settings.shuffle;
+		repeat = settings.repeat;
+		vjs.setVolume(settings.volume);
+		settingsLoaded = true;
 		if (folders.length && !activeFolderPath) activeFolderPath = folders[0].path;
 	}
 
@@ -209,14 +241,18 @@ function createPlayer() {
 		if (result.kind === "noop") return;
 		if (result.kind === "stop") {
 			if (result.index !== undefined) queueIndex = result.index;
+			if (result.history) history = result.history;
 			vjs.pause();
 			return;
 		}
-		if (result.shuffleOrder) {
-			shuffleOrder = result.shuffleOrder;
-			shufflePos = result.shufflePos ?? 0;
+		if (result.kind === "play") {
+			history = result.history;
+			if (result.shuffleOrder) {
+				shuffleOrder = result.shuffleOrder;
+				shufflePos = result.shufflePos ?? 0;
+			}
+			setIndexAndPlay(result.index);
 		}
-		loadAndPlay(result.index);
 	}
 
 	function prev() {
@@ -227,8 +263,9 @@ function createPlayer() {
 			return;
 		}
 		if (result.kind === "play") {
+			history = result.history;
 			if (result.shufflePos !== undefined) shufflePos = result.shufflePos;
-			loadAndPlay(result.index);
+			setIndexAndPlay(result.index);
 		}
 	}
 
