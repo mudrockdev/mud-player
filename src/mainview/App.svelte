@@ -1,239 +1,475 @@
 <script lang="ts">
-  let count = $state(0);
+  import { onMount } from "svelte";
+  import { player } from "./lib/player.svelte";
 
-  function increment() {
-    count += 1;
+  let audio: HTMLAudioElement | undefined = $state();
+
+  onMount(() => {
+    player.init();
+  });
+
+  $effect(() => {
+    if (!audio) return;
+    if (player.isPlaying) audio.play().catch(() => {});
+    else audio.pause();
+  });
+
+  $effect(() => {
+    if (!audio) return;
+    audio.volume = player.volume;
+  });
+
+  function onTimeUpdate() {
+    if (!audio) return;
+    player.currentTime = audio.currentTime;
   }
 
-  function reset() {
-    count = 0;
+  function onLoadedMeta() {
+    if (!audio) return;
+    player.duration = audio.duration || 0;
   }
+
+  function onScrub(e: Event) {
+    if (!audio) return;
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    audio.currentTime = v;
+    player.currentTime = v;
+  }
+
+  function onVolume(e: Event) {
+    player.setVolume(parseFloat((e.target as HTMLInputElement).value));
+  }
+
+  function fmt(s: number): string {
+    if (!isFinite(s) || s < 0) return "0:00";
+    const m = Math.floor(s / 60);
+    const r = Math.floor(s % 60);
+    return `${m}:${r.toString().padStart(2, "0")}`;
+  }
+
+  function trackKey(t: { path: string }) { return t.path; }
 </script>
 
 <main>
-  <div class="container">
-    <h1>Svelte + Electrobun</h1>
-    <p class="subtitle">A fast desktop app with hot module replacement</p>
-
-    <div class="card">
-      <h2>Interactive Counter</h2>
-      <p>
-        Click the button below to test Svelte reactivity. With HMR enabled, you
-        can edit this component and see changes instantly without losing state.
-      </p>
-      <div class="button-group">
-        <button class="primary" onclick={increment}>
-          Count: {count}
-        </button>
-        <button class="secondary" onclick={reset}>
-          Reset
-        </button>
-      </div>
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <h2>Folders</h2>
+      <button class="add" onclick={() => player.addFolder()} title="Import folder">+</button>
     </div>
-
-    <div class="card">
-      <h2>Getting Started</h2>
-      <ul>
-        <li>
-          <span class="number">1.</span>
-          Run <code>bun run dev</code> for development without HMR
-        </li>
-        <li>
-          <span class="number">2.</span>
-          Run <code>bun run dev:hmr</code> for development with hot reload
-        </li>
-        <li>
-          <span class="number">3.</span>
-          Run <code>bun run build</code> to build for production
-        </li>
+    {#if player.folders.length === 0}
+      <p class="empty">No folders yet. Click + to import.</p>
+    {:else}
+      <ul class="folder-list">
+        {#each player.folders as folder (folder.path)}
+          <li
+            class="folder-item"
+            class:active={folder.path === player.activeFolderPath}
+          >
+            <button
+              class="folder-main"
+              ondblclick={() => player.playFolder(folder.path, 0)}
+              onclick={() => player.selectFolder(folder.path)}
+              title={folder.path}
+            >
+              <span class="folder-name">{folder.name}</span>
+              <span class="folder-count">{folder.tracks.length}</span>
+            </button>
+            <div class="folder-actions">
+              <button class="icon-btn" title="Play" onclick={() => player.playFolder(folder.path, 0)}>▶</button>
+              <button class="icon-btn" title="Rescan" onclick={() => player.rescan(folder.path)}>↻</button>
+              <button class="icon-btn danger" title="Remove" onclick={() => player.removeFolder(folder.path)}>✕</button>
+            </div>
+          </li>
+        {/each}
       </ul>
+    {/if}
+  </aside>
+
+  <section class="content">
+    <header class="content-head">
+      {#if player.activeFolder}
+        <div>
+          <h1>{player.activeFolder.name}</h1>
+          <p class="path">{player.activeFolder.path}</p>
+        </div>
+        <button class="play-all" onclick={() => player.activeFolder && player.playFolder(player.activeFolder.path, 0)}>
+          Play all
+        </button>
+      {:else}
+        <div>
+          <h1>mud-player</h1>
+          <p class="path">Import a folder to begin</p>
+        </div>
+      {/if}
+    </header>
+
+    <div class="track-list">
+      {#if player.activeFolder}
+        {#if player.activeFolder.tracks.length === 0}
+          <p class="empty">No audio files in this folder.</p>
+        {:else}
+          {#each player.activeFolder.tracks as track, i (trackKey(track))}
+            <button
+              class="track"
+              class:playing={player.currentTrack?.path === track.path}
+              ondblclick={() => player.playFolder(track.folder, i)}
+              onclick={() => player.playFolder(track.folder, i)}
+            >
+              <span class="track-num">{i + 1}</span>
+              <span class="track-name">{track.name}</span>
+              {#if player.currentTrack?.path === track.path}
+                <span class="now">{player.isPlaying ? "♪" : "❚❚"}</span>
+              {/if}
+            </button>
+          {/each}
+        {/if}
+      {/if}
+    </div>
+  </section>
+
+  <footer class="player-bar">
+    <div class="player-info">
+      {#if player.currentTrack}
+        <div class="now-name">{player.currentTrack.name}</div>
+        <div class="now-folder">{player.currentTrack.folder}</div>
+      {:else}
+        <div class="now-name muted">Nothing playing</div>
+      {/if}
     </div>
 
-    <div class="card">
-      <h2>Stack</h2>
-      <div class="stack-grid">
-        <div class="stack-item">
-          <span class="icon">⚡</span>
-          <span>Electrobun</span>
-        </div>
-        <div class="stack-item">
-          <span class="icon">🔶</span>
-          <span>Svelte 5</span>
-        </div>
-        <div class="stack-item">
-          <span class="icon">🔥</span>
-          <span>Vite HMR</span>
-        </div>
-        <div class="stack-item">
-          <span class="icon">📦</span>
-          <span>Bun</span>
-        </div>
-      </div>
+    <div class="player-controls">
+      <button
+        class="toggle"
+        class:on={player.shuffle}
+        title="Shuffle"
+        onclick={() => player.toggleShuffle()}
+      >⇄</button>
+      <button class="ctrl" title="Previous" onclick={() => player.prev()}>⏮</button>
+      <button class="ctrl primary" title="Play/Pause" onclick={() => player.togglePlay()}>
+        {player.isPlaying ? "⏸" : "▶"}
+      </button>
+      <button class="ctrl" title="Next" onclick={() => player.next(true)}>⏭</button>
+      <button
+        class="toggle"
+        class:on={player.repeat !== "off"}
+        title={player.repeat === "one" ? "Repeat one" : player.repeat === "all" ? "Repeat list" : "Repeat off"}
+        onclick={() => player.cycleRepeat()}
+      >
+        {player.repeat === "one" ? "🔂" : "🔁"}
+      </button>
     </div>
 
-    <div class="footer">
-      <p>
-        Edit <code>src/mainview/App.svelte</code> and save to see HMR in action
-      </p>
+    <div class="player-scrub">
+      <span class="time">{fmt(player.currentTime)}</span>
+      <input
+        type="range"
+        min="0"
+        max={player.duration || 0}
+        step="0.1"
+        value={player.currentTime}
+        oninput={onScrub}
+        disabled={!player.currentTrack}
+      />
+      <span class="time">{fmt(player.duration)}</span>
     </div>
-  </div>
+
+    <div class="player-volume">
+      <span class="vol-ic">🔊</span>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value={player.volume}
+        oninput={onVolume}
+      />
+    </div>
+  </footer>
+
+  {#if player.streamUrl}
+    <audio
+      bind:this={audio}
+      src={player.streamUrl}
+      ontimeupdate={onTimeUpdate}
+      onloadedmetadata={onLoadedMeta}
+      onended={() => player.onEnded()}
+      preload="auto"
+    ></audio>
+  {/if}
 </main>
 
 <style>
   main {
-    min-height: 100vh;
-    background: linear-gradient(135deg, #ff3e00 0%, #ff6b35 100%);
-    padding: 40px 20px;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+      "sidebar content"
+      "player player";
+    height: 100vh;
+    background: #0f1115;
+    color: #e7e9ee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 
-  .container {
-    max-width: 800px;
-    margin: 0 auto;
-  }
-
-  h1 {
-    color: white;
-    font-size: 3rem;
-    text-align: center;
-    margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  }
-
-  .subtitle {
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 1.25rem;
-    text-align: center;
-    margin-top: 0;
-    margin-bottom: 40px;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  }
-
-  .card {
-    background: white;
-    border-radius: 12px;
-    padding: 30px;
-    margin-bottom: 20px;
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-  }
-
-  h2 {
-    color: #ff3e00;
-    margin-top: 0;
-    margin-bottom: 15px;
-  }
-
-  p {
-    color: #666;
-    line-height: 1.6;
-  }
-
-  .button-group {
+  .sidebar {
+    grid-area: sidebar;
+    background: #0a0c10;
+    border-right: 1px solid #1d2230;
     display: flex;
-    gap: 12px;
-    margin-top: 20px;
+    flex-direction: column;
+    overflow: hidden;
   }
+  .sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #1d2230;
+  }
+  .sidebar-head h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8b93a7;
+  }
+  .add {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    border: 1px solid #2a3245;
+    background: #161a24;
+    color: #e7e9ee;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .add:hover { background: #1e2433; }
 
-  button {
-    padding: 12px 24px;
-    font-size: 1rem;
-    font-weight: 500;
+  .folder-list {
+    list-style: none;
+    margin: 0; padding: 6px;
+    overflow-y: auto;
+  }
+  .folder-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+    border-radius: 8px;
+  }
+  .folder-item.active { background: #1a2030; }
+  .folder-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    background: transparent;
     border: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 13px;
+    min-width: 0;
+  }
+  .folder-main:hover { background: #161c28; }
+  .folder-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .folder-count {
+    font-size: 11px;
+    color: #8b93a7;
+    background: #161c28;
+    padding: 1px 6px;
+    border-radius: 10px;
+  }
+  .folder-actions {
+    display: none;
+    gap: 2px;
+  }
+  .folder-item:hover .folder-actions { display: flex; }
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: #8b93a7;
+    width: 24px; height: 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .icon-btn:hover { background: #1e2433; color: #e7e9ee; }
+  .icon-btn.danger:hover { color: #ff7676; }
+
+  .content {
+    grid-area: content;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .content-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 28px 12px;
+  }
+  .content-head h1 { margin: 0; font-size: 26px; font-weight: 700; }
+  .path {
+    margin: 4px 0 0;
+    color: #8b93a7;
+    font-size: 12px;
+  }
+  .play-all {
+    padding: 10px 18px;
+    background: #4d7cff;
+    border: none;
+    border-radius: 999px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .play-all:hover { background: #5b87ff; }
+
+  .track-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 18px 14px;
+  }
+  .track {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    color: inherit;
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    text-align: left;
+    font-size: 14px;
+  }
+  .track:hover { background: #161c28; }
+  .track.playing { background: #1b2237; color: #b8c5ff; }
+  .track-num {
+    width: 28px;
+    text-align: right;
+    color: #8b93a7;
+    font-variant-numeric: tabular-nums;
+  }
+  .track-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .now { color: #6e8bff; }
+
+  .empty {
+    color: #8b93a7;
+    padding: 16px;
+    font-size: 13px;
   }
 
-  button.primary {
-    background: #ff3e00;
-    color: white;
-    box-shadow: 0 2px 4px rgba(255, 62, 0, 0.3);
-  }
-
-  button.primary:hover {
-    background: #e63600;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(255, 62, 0, 0.4);
-  }
-
-  button.secondary {
-    background: #f0f0f0;
-    color: #666;
-  }
-
-  button.secondary:hover {
-    background: #e0e0e0;
-  }
-
-  ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  li {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 10px 0;
-    color: #666;
-  }
-
-  .number {
-    color: #ff3e00;
-    font-weight: bold;
-  }
-
-  code {
-    background: #f5f5f5;
-    color: #555;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-family: "Monaco", "Menlo", monospace;
-    font-size: 0.9em;
-  }
-
-  .stack-grid {
+  .player-bar {
+    grid-area: player;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 15px;
+    grid-template-columns: 260px 1fr 200px;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 18px;
+    background: #0a0c10;
+    border-top: 1px solid #1d2230;
   }
 
-  .stack-item {
+  .player-info {
+    min-width: 0;
+  }
+  .now-name {
+    font-weight: 600;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .now-name.muted { color: #8b93a7; font-weight: 400; }
+  .now-folder {
+    font-size: 11px;
+    color: #8b93a7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .player-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+  .ctrl, .toggle {
+    background: transparent;
+    border: none;
+    color: #cdd3e0;
+    font-size: 18px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .ctrl:hover, .toggle:hover { background: #161c28; }
+  .ctrl.primary {
+    background: #e7e9ee;
+    color: #0f1115;
+    width: 40px; height: 40px;
+    font-size: 16px;
+  }
+  .ctrl.primary:hover { background: white; }
+  .toggle.on { color: #6e8bff; }
+
+  .player-scrub {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .player-bar {
+    grid-template-rows: auto auto;
+  }
+  .player-info { grid-row: 1 / span 2; }
+  .player-volume { grid-row: 1 / span 2; }
+  .time {
+    font-size: 11px;
+    color: #8b93a7;
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
     text-align: center;
-    padding: 20px 10px;
-    background: #fafafa;
-    border-radius: 8px;
   }
-
-  .icon {
-    display: block;
-    font-size: 2rem;
-    margin-bottom: 8px;
+  .player-scrub input,
+  .player-volume input {
+    flex: 1;
+    appearance: none;
+    height: 4px;
+    background: #1d2230;
+    border-radius: 2px;
+    outline: none;
   }
-
-  .footer {
-    text-align: center;
-    color: rgba(255, 255, 255, 0.8);
-    margin-top: 30px;
-    padding: 20px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    backdrop-filter: blur(10px);
+  .player-scrub input::-webkit-slider-thumb,
+  .player-volume input::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px; height: 12px;
+    background: #e7e9ee;
+    border-radius: 50%;
+    cursor: pointer;
   }
-
-  .footer p {
-    color: inherit;
-    margin: 0;
+  .player-volume {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-
-  .footer code {
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
-  }
-
-  @media (max-width: 600px) {
-    .stack-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
+  .vol-ic { font-size: 14px; color: #8b93a7; }
 </style>
