@@ -3,9 +3,17 @@ import { audioFeatures } from "@videojs/core/dom";
 import type { Audio as VjsAudio } from "@videojs/core";
 import type { AudioPlayerStore, PlayerTarget } from "@videojs/core/dom";
 import type { Folder, Track } from "../../shared/types";
+import {
+	buildShuffleOrder,
+	cycleRepeat as cycleRepeatMode,
+	nextTrack,
+	prevTrack,
+	type QueueState,
+	type RepeatMode,
+} from "./queue";
 import { bun } from "./rpc";
 
-export type RepeatMode = "off" | "one" | "all";
+export type { RepeatMode };
 
 function createPlayer() {
 	// ── Application-level state (playlist/queue/shuffle/repeat) ────────────
@@ -39,9 +47,8 @@ function createPlayer() {
 
 	function syncFromStore() {
 		const s = vjs.state as Record<string, unknown>;
-		const nextPaused = (s.paused as boolean) ?? true;
 		const wasEnded = ended;
-		paused = nextPaused;
+		paused = (s.paused as boolean) ?? true;
 		ended = (s.ended as boolean) ?? false;
 		currentTime = (s.currentTime as number) ?? 0;
 		duration = (s.duration as number) ?? 0;
@@ -62,6 +69,16 @@ function createPlayer() {
 	);
 	const isPlaying = $derived(!paused);
 
+	function snapshot(): QueueState {
+		return {
+			length: queue.length,
+			index: queueIndex,
+			shuffle,
+			shuffleOrder,
+			shufflePos,
+			repeat,
+		};
+	}
 
 	function streamUrlFor(track: Track | null): string {
 		if (!track || !streamPort) return "";
@@ -79,19 +96,6 @@ function createPlayer() {
 		void vjs.play().catch((err) => {
 			console.error("[player] play() failed:", err);
 		});
-	}
-
-	// ── Helpers ────────────────────────────────────────────────────────────
-	function buildShuffleOrder(startWith: number) {
-		const order = Array.from({ length: queue.length }, (_, i) => i);
-		for (let i = order.length - 1; i > 0; i--) {
-			const j = Math.floor(Math.random() * (i + 1));
-			[order[i], order[j]] = [order[j], order[i]];
-		}
-		const idx = order.indexOf(startWith);
-		if (idx > 0) [order[0], order[idx]] = [order[idx], order[0]];
-		shuffleOrder = order;
-		shufflePos = 0;
 	}
 
 	function handleEnded() {
@@ -143,7 +147,10 @@ function createPlayer() {
 		activeFolderPath = path;
 		queue = folder.tracks.slice();
 		const idx = Math.min(Math.max(startIndex, 0), queue.length - 1);
-		if (shuffle) buildShuffleOrder(idx);
+		if (shuffle) {
+			shuffleOrder = buildShuffleOrder(queue.length, idx);
+			shufflePos = 0;
+		}
 		loadAndPlay(idx);
 	}
 
@@ -160,11 +167,8 @@ function createPlayer() {
 			if (activeFolder && activeFolder.tracks.length) playFolder(activeFolder.path, 0);
 			return;
 		}
-		if (paused) {
-				void vjs.play().catch(() => {});
-		} else {
-				vjs.pause();
-		}
+		if (paused) void vjs.play().catch(() => {});
+		else vjs.pause();
 	}
 
 	function stop() {
@@ -174,62 +178,43 @@ function createPlayer() {
 	}
 
 	function next(userInitiated = true) {
-		if (queue.length === 0) return;
-		if (shuffle) {
-			if (shuffleOrder.length !== queue.length) buildShuffleOrder(Math.max(queueIndex, 0));
-			if (shufflePos + 1 < shuffleOrder.length) {
-				shufflePos += 1;
-				loadAndPlay(shuffleOrder[shufflePos]);
-				return;
-			}
-			if (repeat === "all") {
-				buildShuffleOrder(-1);
-				shufflePos = 0;
-				loadAndPlay(shuffleOrder[0]);
-				return;
-			}
-			if (userInitiated) queueIndex = shuffleOrder[shuffleOrder.length - 1];
-				vjs.pause();
+		const result = nextTrack(snapshot(), userInitiated);
+		if (result.kind === "noop") return;
+		if (result.kind === "stop") {
+			if (result.index !== undefined) queueIndex = result.index;
+			vjs.pause();
 			return;
 		}
-		if (queueIndex + 1 < queue.length) {
-			loadAndPlay(queueIndex + 1);
-			return;
+		if (result.shuffleOrder) {
+			shuffleOrder = result.shuffleOrder;
+			shufflePos = result.shufflePos ?? 0;
 		}
-		if (repeat === "all") {
-			loadAndPlay(0);
-			return;
-		}
-		vjs.pause();
+		loadAndPlay(result.index);
 	}
 
 	function prev() {
-		if (queue.length === 0) return;
-		if (currentTime > 3) {
+		const result = prevTrack(snapshot(), currentTime);
+		if (result.kind === "noop") return;
+		if (result.kind === "restart") {
 			void vjs.seek(0);
 			return;
 		}
-		if (shuffle) {
-			if (shufflePos > 0) {
-				shufflePos -= 1;
-				loadAndPlay(shuffleOrder[shufflePos]);
-			}
-			return;
+		if (result.kind === "play") {
+			if (result.shufflePos !== undefined) shufflePos = result.shufflePos;
+			loadAndPlay(result.index);
 		}
-		if (queueIndex > 0) {
-			loadAndPlay(queueIndex - 1);
-			return;
-		}
-		if (repeat === "all") loadAndPlay(queue.length - 1);
 	}
 
 	function toggleShuffle() {
 		shuffle = !shuffle;
-		if (shuffle && queue.length) buildShuffleOrder(Math.max(queueIndex, 0));
+		if (shuffle && queue.length) {
+			shuffleOrder = buildShuffleOrder(queue.length, Math.max(queueIndex, 0));
+			shufflePos = 0;
+		}
 	}
 
 	function cycleRepeat() {
-		repeat = repeat === "off" ? "all" : repeat === "all" ? "one" : "off";
+		repeat = cycleRepeatMode(repeat);
 	}
 
 	function seek(seconds: number) {
