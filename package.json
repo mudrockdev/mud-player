@@ -8,7 +8,8 @@
     "dev": "electrobun dev --watch",
     "dev:hmr": "concurrently \"bun run hmr\" \"bun run start\"",
     "hmr": "vite --port 5173",
-    "build:canary": "vite build && electrobun build --env=canary"
+    "build:canary": "vite build && electrobun build --env=canary",
+    "db:generate": "drizzle-kit generate && bun scripts/generate-migrations.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
