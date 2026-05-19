@@ -1,35 +1,89 @@
+import { combine, createStore } from "@videojs/store";
+import { audioFeatures } from "@videojs/core/dom";
+import type { Audio as VjsAudio } from "@videojs/core";
+import type { AudioPlayerStore, PlayerTarget } from "@videojs/core/dom";
 import type { Folder, Track } from "../../shared/types";
 import { bun } from "./rpc";
 
 export type RepeatMode = "off" | "one" | "all";
 
 function createPlayer() {
+	// ── Application-level state (playlist/queue/shuffle/repeat) ────────────
 	let folders = $state<Folder[]>([]);
 	let activeFolderPath = $state<string | null>(null);
 	let queue = $state<Track[]>([]);
 	let queueIndex = $state<number>(-1);
 	let shuffle = $state<boolean>(false);
 	let repeat = $state<RepeatMode>("off");
-	let isPlaying = $state<boolean>(false);
-	let currentTime = $state<number>(0);
-	let duration = $state<number>(0);
-	let volume = $state<number>(1);
 	let streamPort = $state<number>(0);
 	let shuffleOrder = $state<number[]>([]);
 	let shufflePos = $state<number>(-1);
 
+	// ── Mirror of @videojs/core store state into Svelte runes ──────────────
+	let paused = $state<boolean>(true);
+	let ended = $state<boolean>(false);
+	let currentTime = $state<number>(0);
+	let duration = $state<number>(0);
+	let volume = $state<number>(1);
+	let muted = $state<boolean>(false);
+
+	// ── Headless videojs audio player ──────────────────────────────────────
+	const audioEl = new Audio();
+	audioEl.preload = "auto";
+	audioEl.crossOrigin = "anonymous";
+
+	const vjs = createStore<PlayerTarget>()(
+		combine(...audioFeatures),
+	) as unknown as AudioPlayerStore;
+
+	vjs.attach({ media: audioEl as unknown as VjsAudio, container: null });
+
+	function syncFromStore() {
+		const s = vjs.state as Record<string, unknown>;
+		const nextPaused = (s.paused as boolean) ?? true;
+		const wasEnded = ended;
+		paused = nextPaused;
+		ended = (s.ended as boolean) ?? false;
+		currentTime = (s.currentTime as number) ?? 0;
+		duration = (s.duration as number) ?? 0;
+		volume = (s.volume as number) ?? 1;
+		muted = (s.muted as boolean) ?? false;
+		if (!wasEnded && ended) handleEnded();
+	}
+
+	syncFromStore();
+	vjs.subscribe(() => syncFromStore());
+
+	// ── Derived values ─────────────────────────────────────────────────────
 	const activeFolder = $derived(
-		folders.find((f) => f.path === activeFolderPath) ?? null
+		folders.find((f) => f.path === activeFolderPath) ?? null,
 	);
 	const currentTrack = $derived(
-		queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null
+		queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null,
 	);
 	const streamUrl = $derived(
 		currentTrack && streamPort
 			? `http://127.0.0.1:${streamPort}/audio?path=${encodeURIComponent(currentTrack.path)}`
-			: ""
+			: "",
 	);
+	const isPlaying = $derived(!paused);
 
+	// Keep the engine's source in sync with the current track.
+	$effect.root(() => {
+		$effect(() => {
+			const url = streamUrl;
+			if (!url) return;
+			if (vjs.state.source !== url) {
+				vjs.loadSource(url);
+				// Play newly-loaded source unless user explicitly paused.
+				if (!pausedByUser) void vjs.play().catch(() => {});
+			}
+		});
+	});
+
+	let pausedByUser = false;
+
+	// ── Helpers ────────────────────────────────────────────────────────────
 	function buildShuffleOrder(startWith: number) {
 		const order = Array.from({ length: queue.length }, (_, i) => i);
 		for (let i = order.length - 1; i > 0; i--) {
@@ -42,6 +96,15 @@ function createPlayer() {
 		shufflePos = 0;
 	}
 
+	function handleEnded() {
+		if (repeat === "one") {
+			void vjs.seek(0).then(() => vjs.play().catch(() => {}));
+			return;
+		}
+		next(false);
+	}
+
+	// ── Library actions ────────────────────────────────────────────────────
 	async function init() {
 		streamPort = await bun.getStreamPort({});
 		folders = await bun.loadFolders({});
@@ -62,9 +125,7 @@ function createPlayer() {
 		if (activeFolderPath === path) {
 			activeFolderPath = folders[0]?.path ?? null;
 		}
-		if (currentTrack && currentTrack.folder === path) {
-			stop();
-		}
+		if (currentTrack && currentTrack.folder === path) stop();
 	}
 
 	async function rescan(path: string) {
@@ -77,6 +138,7 @@ function createPlayer() {
 		activeFolderPath = path;
 	}
 
+	// ── Transport ──────────────────────────────────────────────────────────
 	function playFolder(path: string, startIndex = 0) {
 		const folder = folders.find((f) => f.path === path);
 		if (!folder || folder.tracks.length === 0) return;
@@ -84,7 +146,8 @@ function createPlayer() {
 		queue = folder.tracks.slice();
 		queueIndex = Math.min(Math.max(startIndex, 0), queue.length - 1);
 		if (shuffle) buildShuffleOrder(queueIndex);
-		isPlaying = true;
+		pausedByUser = false;
+		// The $effect on streamUrl will load + play the new source.
 	}
 
 	function playTrack(track: Track) {
@@ -100,15 +163,20 @@ function createPlayer() {
 			if (activeFolder && activeFolder.tracks.length) playFolder(activeFolder.path, 0);
 			return;
 		}
-		isPlaying = !isPlaying;
+		if (paused) {
+			pausedByUser = false;
+			void vjs.play().catch(() => {});
+		} else {
+			pausedByUser = true;
+			vjs.pause();
+		}
 	}
 
 	function stop() {
-		isPlaying = false;
+		pausedByUser = true;
+		vjs.pause();
 		queue = [];
 		queueIndex = -1;
-		currentTime = 0;
-		duration = 0;
 	}
 
 	function next(userInitiated = true) {
@@ -118,68 +186,58 @@ function createPlayer() {
 			if (shufflePos + 1 < shuffleOrder.length) {
 				shufflePos += 1;
 				queueIndex = shuffleOrder[shufflePos];
-				isPlaying = true;
+				pausedByUser = false;
 				return;
 			}
 			if (repeat === "all") {
 				buildShuffleOrder(-1);
 				shufflePos = 0;
 				queueIndex = shuffleOrder[0];
-				isPlaying = true;
+				pausedByUser = false;
 				return;
 			}
-			if (userInitiated) {
-				queueIndex = shuffleOrder[shuffleOrder.length - 1];
-			}
-			isPlaying = false;
+			if (userInitiated) queueIndex = shuffleOrder[shuffleOrder.length - 1];
+			pausedByUser = true;
+			vjs.pause();
 			return;
 		}
 		if (queueIndex + 1 < queue.length) {
 			queueIndex += 1;
-			isPlaying = true;
+			pausedByUser = false;
 			return;
 		}
 		if (repeat === "all") {
 			queueIndex = 0;
-			isPlaying = true;
+			pausedByUser = false;
 			return;
 		}
-		isPlaying = false;
+		pausedByUser = true;
+		vjs.pause();
 	}
 
 	function prev() {
 		if (queue.length === 0) return;
 		if (currentTime > 3) {
-			currentTime = 0;
+			void vjs.seek(0);
 			return;
 		}
 		if (shuffle) {
 			if (shufflePos > 0) {
 				shufflePos -= 1;
 				queueIndex = shuffleOrder[shufflePos];
-				isPlaying = true;
-				return;
+				pausedByUser = false;
 			}
 			return;
 		}
 		if (queueIndex > 0) {
 			queueIndex -= 1;
-			isPlaying = true;
+			pausedByUser = false;
 			return;
 		}
 		if (repeat === "all") {
 			queueIndex = queue.length - 1;
-			isPlaying = true;
+			pausedByUser = false;
 		}
-	}
-
-	function onEnded() {
-		if (repeat === "one") {
-			currentTime = 0;
-			isPlaying = true;
-			return;
-		}
-		next(false);
 	}
 
 	function toggleShuffle() {
@@ -192,29 +250,35 @@ function createPlayer() {
 	}
 
 	function seek(seconds: number) {
-		currentTime = seconds;
+		void vjs.seek(seconds);
 	}
 
 	function setVolume(v: number) {
-		volume = Math.min(1, Math.max(0, v));
+		vjs.setVolume(v);
+	}
+
+	function toggleMuted() {
+		vjs.toggleMuted();
 	}
 
 	return {
+		// library
 		get folders() { return folders; },
 		get activeFolderPath() { return activeFolderPath; },
 		get activeFolder() { return activeFolder; },
 		get queue() { return queue; },
 		get queueIndex() { return queueIndex; },
 		get currentTrack() { return currentTrack; },
-		get streamUrl() { return streamUrl; },
+		// playback
 		get isPlaying() { return isPlaying; },
+		get paused() { return paused; },
+		get currentTime() { return currentTime; },
+		get duration() { return duration; },
+		get volume() { return volume; },
+		get muted() { return muted; },
 		get shuffle() { return shuffle; },
 		get repeat() { return repeat; },
-		get currentTime() { return currentTime; },
-		set currentTime(v: number) { currentTime = v; },
-		get duration() { return duration; },
-		set duration(v: number) { duration = v; },
-		get volume() { return volume; },
+		// actions
 		init,
 		addFolder,
 		removeFolder,
@@ -226,11 +290,11 @@ function createPlayer() {
 		stop,
 		next,
 		prev,
-		onEnded,
 		toggleShuffle,
 		cycleRepeat,
 		seek,
 		setVolume,
+		toggleMuted,
 	};
 }
 

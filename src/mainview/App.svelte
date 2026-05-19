@@ -15,38 +15,12 @@
     } from "@lucide/svelte";
     import { player } from "./lib/player.svelte";
 
-    let audio: HTMLAudioElement | undefined = $state();
-
     onMount(() => {
         player.init();
     });
 
-    $effect(() => {
-        if (!audio) return;
-        if (player.isPlaying) audio.play().catch(() => {});
-        else audio.pause();
-    });
-
-    $effect(() => {
-        if (!audio) return;
-        audio.volume = player.volume;
-    });
-
-    function onTimeUpdate() {
-        if (!audio) return;
-        player.currentTime = audio.currentTime;
-    }
-
-    function onLoadedMeta() {
-        if (!audio) return;
-        player.duration = audio.duration || 0;
-    }
-
     function onScrub(e: Event) {
-        if (!audio) return;
-        const v = parseFloat((e.target as HTMLInputElement).value);
-        audio.currentTime = v;
-        player.currentTime = v;
+        player.seek(parseFloat((e.target as HTMLInputElement).value));
     }
 
     function onVolume(e: Event) {
@@ -351,16 +325,6 @@
         </div>
     </footer>
 
-    {#if player.streamUrl}
-        <audio
-            bind:this={audio}
-            src={player.streamUrl}
-            ontimeupdate={onTimeUpdate}
-            onloadedmetadata={onLoadedMeta}
-            onended={() => player.onEnded()}
-            preload="auto"
-        ></audio>
-    {/if}
 </main>
 
 <style>
