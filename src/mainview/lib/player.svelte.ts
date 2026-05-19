@@ -3,6 +3,7 @@ import { audioFeatures } from "@videojs/core/dom";
 import type { Audio as VjsAudio } from "@videojs/core";
 import type { AudioPlayerStore, PlayerTarget } from "@videojs/core/dom";
 import type { Folder, Track } from "../../shared/types";
+import { fallbackActivePath, mergeFolder, replaceFolder } from "./folder-list";
 import {
 	buildShuffleOrder,
 	cycleRepeat as cycleRepeatMode,
@@ -175,24 +176,24 @@ function createPlayer() {
 	async function addFolder() {
 		const folder = await bun.pickFolder({});
 		if (!folder) return;
-		const existing = folders.findIndex((f) => f.path === folder.path);
-		if (existing >= 0) folders[existing] = folder;
-		else folders = [...folders, folder];
+		// Replace the entire array reference so Svelte's $state reliably
+		// re-renders the sidebar. Index mutation also triggers reactivity in
+		// theory but a flat reassign avoids any timing edge case from the
+		// awaited RPC round-trip.
+		folders = mergeFolder(folders, folder);
 		activeFolderPath = folder.path;
 	}
 
 	async function removeFolder(path: string) {
 		folders = await bun.removeFolder({ path });
-		if (activeFolderPath === path) {
-			activeFolderPath = folders[0]?.path ?? null;
-		}
+		activeFolderPath = fallbackActivePath(folders, path);
 		if (currentTrack && currentTrack.folder === path) stop();
 	}
 
 	async function rescan(path: string) {
 		const folder = await bun.rescanFolder({ path });
 		if (!folder) return;
-		folders = folders.map((f) => (f.path === path ? folder : f));
+		folders = replaceFolder(folders, folder);
 	}
 
 	function selectFolder(path: string) {
